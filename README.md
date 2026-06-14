@@ -4,6 +4,7 @@
 
 **Recover a Claude Code session when Anthropic's API output classifier false-positives on legitimate engineering work — and stop it happening again.**
 
+[![plugin-validate](https://github.com/88plug/recover-from-false-positive/actions/workflows/plugin-validate.yml/badge.svg)](https://github.com/88plug/recover-from-false-positive/actions/workflows/plugin-validate.yml)
 [![License: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue?style=flat)](LICENSE.md)
 [![Version](https://img.shields.io/badge/version-2026.6.1-green?style=flat)](.claude-plugin/plugin.json)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2?style=flat)](https://github.com/88plug/claude-code-plugins)
