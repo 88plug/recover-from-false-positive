@@ -6,7 +6,7 @@
 
 [![plugin-validate](https://github.com/88plug/recover-from-false-positive/actions/workflows/plugin-validate.yml/badge.svg)](https://github.com/88plug/recover-from-false-positive/actions/workflows/plugin-validate.yml)
 [![License: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue?style=flat)](LICENSE.md)
-[![Version](https://img.shields.io/badge/version-2026.6.2-green?style=flat)](.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-2026.6.3-green?style=flat)](.claude-plugin/plugin.json)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2?style=flat)](https://github.com/88plug/claude-code-plugins)
 
 </div>
@@ -100,6 +100,32 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/recover-from-false-positive/scripts/scrub_r
 > `edgar-morin`/`start_complex_reasoning` classification step expects that
 > reasoning tool to be available; without it, fall back to the skill's manual
 > classification matrix.
+
+## Recovery & the auto-fallback limitation
+
+> [!IMPORTANT]
+> Claude Code has **no in-place auto-fallback to another model** on this error.
+> Its only refusal auto-fallback is hardwired Fable 5 → Opus; `fallbackModel`
+> covers availability errors (overload/unavailable) only — not policy refusals;
+> and no hook can switch the active model. So a trip ends the turn, and the
+> switch is a manual user action.
+
+When a turn is blocked, the un-stick path is:
+
+1. This plugin's detect hook repairs the poisoned log so `--resume` stays safe.
+2. Run **`/model claude-sonnet-4-6`** and re-send — a same-generation, lower-risk
+   model often clears it.
+3. Or start a **new session** — context saturation is the usual real cause.
+
+For fully automatic recovery (no manual step), two out-of-band options work — opt
+in yourself, this plugin does not ship them by default:
+
+- **Local proxy** at `ANTHROPIC_BASE_URL` that retries a refused request on the
+  next model in a fallback chain (e.g. Opus 4.6 → Sonnet 4.6), transparent to the
+  CLI and before the transcript is poisoned. Best for interactive use.
+- **Headless loop** for autonomous runs: wrap `claude -p … --output-format json`,
+  detect `result.is_error` / the Usage-Policy string, and relaunch with
+  `--model claude-sonnet-4-6` (loop-guarded to avoid runaway relaunches).
 
 ## License
 

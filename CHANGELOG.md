@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.6.3
+
+- Recovery hook now surfaces the exact un-stick command (`/model claude-sonnet-4-6`
+  + re-send, or new session) when a generation is re-blocked — Claude Code has no
+  in-place auto-fallback for this error, so the switch is a manual user action.
+- README documents the auto-fallback limitation and the two out-of-band
+  auto-recovery options (local proxy at ANTHROPIC_BASE_URL; headless is_error loop).
+
 ## 2026.6.2
 
 - Bundle the full detection + recovery + prevention hook pipeline:

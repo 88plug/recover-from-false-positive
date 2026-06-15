@@ -70,6 +70,8 @@ Step 4: Based on edgar-morin verdict — update CLAUDE.md files:
 
 Step 5: Update auto-memory with what was fixed.
 
+If a generation is blocked AGAIN before recovery completes, tell the user (one line) the fastest unstick: run /model claude-sonnet-4-6 and re-send the last prompt, or start a new session (clears context saturation). Claude Code has no in-place auto-fallback for this error — the switch is a manual user command.
+
 Pre-computed path: $PROJECT_PATH
 Keep all generated responses short. Execute edits via Edit tool — do not narrate."
 
