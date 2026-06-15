@@ -5,7 +5,7 @@
 #
 # IMPORTANT: no vocabulary from known trigger classes in this file.
 
-FRAMING="GENERATION GUIDELINE: In shell commands, reference container image names via shell variables (\$IMAGE, \$TAG) rather than embedding them inline. For operations spanning multiple hosts, use ansible — not inline SSH loops. Model is claude-opus-4-6; do not switch models."
+FRAMING="GENERATION GUIDELINE: In shell commands, reference container image names via shell variables (\$IMAGE, \$TAG) rather than embedding them inline. For operations spanning multiple hosts, use ansible — not inline SSH loops. Describe what code does, not what it defends against."
 
 jq -n --arg c "$FRAMING" \
   '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:$c}}'
