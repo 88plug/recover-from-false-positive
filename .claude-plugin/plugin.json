@@ -11,7 +11,6 @@
   "repository": "https://github.com/88plug/recover-from-false-positive.git",
   "license": "FSL-1.1-ALv2",
   "version": "2026.6.2",
-  "defaultEnabled": false,
   "keywords": [
     "claude-code",
     "classifier",

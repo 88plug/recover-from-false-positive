@@ -8,9 +8,10 @@
   `inject-claudemd-into-subagents.sh` (SubagentStart).
 - Skill declares `allowed-tools` so the repair script and CLAUDE.md edits run
   without per-call permission prompts during recovery.
-- Ship `defaultEnabled: false` — the hooks inject context every turn/subagent, so
-  install does not silently activate them; enable the plugin to turn them on.
 - Add `tests/smoke.sh` (run in CI).
+
+Enabled by default (the auto-detect/recovery hooks are the whole point); the
+install panel lists every hook so activation is transparent, not silent.
 
 ## 2026.6.1
 
