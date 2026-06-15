@@ -2,6 +2,7 @@
 name: recover-from-false-positive
 description: >-
   Recover Claude Code session logs after an Anthropic API output-classifier false positive — the "cyber-related safeguards" / "appears to violate our Usage Policy" hard failure that kills a turn mid-generation. Use to (a) surgically remove the triggering user message + error response from the active session so it resumes cleanly, (b) clean accumulated refusal turns across old sessions, and (c) stop recurrence via a per-repo CLAUDE.md framing guard. PROACTIVE: if "appears to violate our Usage Policy" or "cyber-related safeguards" appears anywhere — user message, error output, tool result, workflow failure — invoke immediately without being asked. Also trigger on: "false positive", "fake violation", "it blocked me again", "remove the refusals from the logs", "cannot resume my conversation", "scrub the session logs", or any known-legitimate repo (mining, supply-chain/sigstore, BTCPay/Lightning, chaos/infra-ops, security infra) that tripped the classifier. JSON-aware log surgeon, never a blind sed/grep delete.
+allowed-tools: Bash(python3 *) Read Edit Grep Glob
 ---
 
 # Recover from a cyber-safeguard false positive

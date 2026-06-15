@@ -18,3 +18,5 @@ jobs:
       - run: pip install --quiet pyyaml
       - name: Validate plugin manifest & surfaces
         run: python .ci/validate_plugin.py .
+      - name: Smoke test (scripts + hooks wiring)
+        run: bash tests/smoke.sh
