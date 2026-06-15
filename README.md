@@ -6,7 +6,7 @@
 
 [![plugin-validate](https://github.com/88plug/recover-from-false-positive/actions/workflows/plugin-validate.yml/badge.svg)](https://github.com/88plug/recover-from-false-positive/actions/workflows/plugin-validate.yml)
 [![License: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue?style=flat)](LICENSE.md)
-[![Version](https://img.shields.io/badge/version-2026.6.1-green?style=flat)](.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-2026.6.2-green?style=flat)](.claude-plugin/plugin.json)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2?style=flat)](https://github.com/88plug/claude-code-plugins)
 
 </div>
@@ -51,6 +51,22 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/recover-from-false-positive/scripts/scrub_r
   `## Cyber-safeguard false positives — READ FIRST` guard in the right
   `CLAUDE.md`, naming the actual trigger files and vocabulary.
 
+## How the automatic pipeline works
+
+The bundled hooks make recovery and prevention hands-free:
+
+- **`StopFailure` → detect** — when a turn dies on the classifier, a pure-Python
+  hook reads the live transcript, extracts the trigger vocabulary, pre-classifies
+  it (project-only vs cross-project), and writes `~/.claude/.fp-state.json`. No
+  model generation, so it can't itself re-trip.
+- **`UserPromptSubmit` → recover** — on your next prompt, if that state file
+  exists, the recovery steps (repair the log, classify with edgar-morin, update
+  the right `CLAUDE.md`) are injected and the state file is consumed. It also
+  always injects a short neutral generation guideline.
+- **`SubagentStart` → frame** — every subagent gets the neutral generation
+  guideline so spawned prompts don't trip; `Explore`/`Plan` additionally get the
+  full `CLAUDE.md` re-injected (they skip it by default).
+
 ## Why not `sed -i '/violate/d'`
 
 Claude Code `.jsonl` logs are a linked list — every turn carries a `uuid` and a
@@ -69,11 +85,21 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/recover-from-false-positive/scripts/scrub_r
 
 ## What it bundles
 
-- `scripts/scrub_refusals.py` — the chain-re-stitching log surgeon.
-- `references/prevention.md` — per-repo `CLAUDE.md` guard templates
-  (supply-chain/sigstore, mining/PoW, BTCPay/Lightning, chaos/infra-ops).
+- A **skill** (`recover-from-false-positive`) with `scripts/scrub_refusals.py` —
+  the chain-re-stitching log surgeon — and `references/prevention.md`, per-repo
+  `CLAUDE.md` guard templates (supply-chain/sigstore, mining/PoW, BTCPay/Lightning,
+  chaos/infra-ops).
+- Four **hooks** (`hooks/hooks.json`): `detect-false-positive.py` (StopFailure),
+  `inject-recovery-context.sh` (UserPromptSubmit), `inject-subagent-framing.sh`
+  and `inject-claudemd-into-subagents.sh` (SubagentStart).
 
-No MCP, no hooks — one skill and one auditable script.
+> [!NOTE]
+> The hooks run automatically once the plugin is enabled (Claude Code lists them
+> in the install panel). They are read-only except for `~/.claude/.fp-state.json`,
+> which the detect hook writes and the recovery hook consumes. The
+> `edgar-morin`/`start_complex_reasoning` classification step expects that
+> reasoning tool to be available; without it, fall back to the skill's manual
+> classification matrix.
 
 ## License
 

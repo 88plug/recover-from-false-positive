@@ -1,0 +1,51 @@
+{
+  "description": "Detect API output-classifier false positives, auto-surface recovery, and inject neutral generation framing to prevent re-trips.",
+  "hooks": {
+    "StopFailure": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/detect-false-positive.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inject-recovery-context.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inject-subagent-framing.sh\"",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Explore|Plan",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inject-claudemd-into-subagents.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
