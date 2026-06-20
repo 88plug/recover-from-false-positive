@@ -2,6 +2,8 @@
 
 # recover-from-false-positive
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/88plug/recover-from-false-positive)
+
 **Recover a Claude Code session when Anthropic's API output classifier false-positives on legitimate engineering work — and stop it happening again.**
 
 [![plugin-validate](https://github.com/88plug/recover-from-false-positive/actions/workflows/plugin-validate.yml/badge.svg)](https://github.com/88plug/recover-from-false-positive/actions/workflows/plugin-validate.yml)
