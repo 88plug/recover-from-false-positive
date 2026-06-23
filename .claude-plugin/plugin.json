@@ -13,11 +13,25 @@
   "version": "2026.6.3",
   "keywords": [
     "claude-code",
+    "claude",
+    "anthropic",
+    "ai",
+    "llm",
+    "ai-agents",
+    "developer-tools",
+    "productivity",
+    "automation",
+    "cli",
+    "claude-code-plugin",
+    "claude-skills",
     "classifier",
     "false-positive",
     "session-recovery",
     "jsonl",
     "log-repair",
-    "usage-policy"
-  ]
+    "usage-policy",
+    "content-filter",
+    "refusal-recovery"
+  ],
+  "hooks": "./hooks/hooks.json"
 }

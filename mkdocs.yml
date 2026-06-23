@@ -1,5 +1,9 @@
 site_name: Recover From False Positive
 site_description: Recover a Claude Code session when Anthropic's API output classifier false-positives on legitimate engineering work — and stop it happening again.
+site_url: https://88plug.github.io/recover-from-false-positive/
+repo_url: https://github.com/88plug/recover-from-false-positive
+repo_name: 88plug/recover-from-false-positive
+edit_uri: edit/main/docs/
 use_directory_urls: true
 
 theme:
@@ -26,6 +30,7 @@ theme:
 markdown_extensions:
   - admonition
   - attr_list
+  - md_in_html
   - def_list
   - footnotes
   - tables

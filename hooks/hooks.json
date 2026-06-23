@@ -20,7 +20,7 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inject-recovery-context.sh\"",
-            "timeout": 15
+            "timeout": 10
           }
         ]
       }

@@ -1,15 +1,11 @@
-<div align="center">
-
 # recover-from-false-positive
 
 **Recover a Claude Code session when Anthropic's API output classifier false-positives on legitimate engineering work — and stop it happening again.**
 
 [![plugin-validate](https://github.com/88plug/recover-from-false-positive/actions/workflows/plugin-validate.yml/badge.svg)](https://github.com/88plug/recover-from-false-positive/actions/workflows/plugin-validate.yml)
-[![License: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue?style=flat)](LICENSE.md)
-[![Version](https://img.shields.io/badge/version-2026.6.3-green?style=flat)](.claude-plugin/plugin.json)
+[![License: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue?style=flat)](https://github.com/88plug/recover-from-false-positive/blob/main/LICENSE.md)
+[![Version](https://img.shields.io/badge/version-2026.6.3-green?style=flat)](https://github.com/88plug/recover-from-false-positive/blob/main/.claude-plugin/plugin.json)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2?style=flat)](https://github.com/88plug/claude-code-plugins)
-
-</div>
 
 A Claude Code plugin for the hard request failure *"appears to violate our Usage
 Policy / this request triggered cyber-related safeguards"* — the one that kills a
@@ -37,9 +33,9 @@ appears anywhere in the conversation. To run the surgeon directly:
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/recover-from-false-positive/scripts/scrub_refusals.py --fix-active
 ```
 
-> [!NOTE]
-> Detect-only by default. The script makes a backup tarball before writing and
-> refuses any change that would add a dangling `parentUuid`.
+!!! note
+    Detect-only by default. The script makes a backup tarball before writing and
+    refuses any change that would add a dangling `parentUuid`.
 
 ## What it does
 
@@ -93,22 +89,22 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/recover-from-false-positive/scripts/scrub_r
   `inject-recovery-context.sh` (UserPromptSubmit), `inject-subagent-framing.sh`
   and `inject-claudemd-into-subagents.sh` (SubagentStart).
 
-> [!NOTE]
-> The hooks run automatically once the plugin is enabled (Claude Code lists them
-> in the install panel). They are read-only except for `~/.claude/.fp-state.json`,
-> which the detect hook writes and the recovery hook consumes. The
-> `edgar-morin`/`start_complex_reasoning` classification step expects that
-> reasoning tool to be available; without it, fall back to the skill's manual
-> classification matrix.
+!!! note
+    The hooks run automatically once the plugin is enabled (Claude Code lists them
+    in the install panel). They are read-only except for `~/.claude/.fp-state.json`,
+    which the detect hook writes and the recovery hook consumes. The
+    `edgar-morin`/`start_complex_reasoning` classification step expects that
+    reasoning tool to be available; without it, fall back to the skill's manual
+    classification matrix.
 
 ## Recovery & the auto-fallback limitation
 
-> [!IMPORTANT]
-> Claude Code has **no in-place auto-fallback to another model** on this error.
-> Its only refusal auto-fallback is hardwired Fable 5 → Opus; `fallbackModel`
-> covers availability errors (overload/unavailable) only — not policy refusals;
-> and no hook can switch the active model. So a trip ends the turn, and the
-> switch is a manual user action.
+!!! important
+    Claude Code has **no in-place auto-fallback to another model** on this error.
+    Its only refusal auto-fallback is hardwired Fable 5 → Opus; `fallbackModel`
+    covers availability errors (overload/unavailable) only — not policy refusals;
+    and no hook can switch the active model. So a trip ends the turn, and the
+    switch is a manual user action.
 
 When a turn is blocked, the un-stick path is:
 
