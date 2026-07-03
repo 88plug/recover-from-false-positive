@@ -26,6 +26,15 @@ def _sig(t):
     return any(s.lower() in low for s in (SIGNATURES + _FALLBACK))
 
 
+def _is_refusal(o):
+    """Reword-proof: structural (message.stop_reason == 'refusal') OR a known wording.
+    The structural path fires on a brand-new wording the day it ships."""
+    if not (isinstance(o, dict) and o.get("isApiErrorMessage")):
+        return False
+    m = o.get("message") if isinstance(o.get("message"), dict) else {}
+    return m.get("stop_reason") == "refusal" or _sig(_text(o))
+
+
 STATE_FILE = os.path.expanduser("~/.claude/.fp-state.json")
 GLOBAL_CLAUDE_MD = os.path.expanduser("~/.claude/CLAUDE.md")
 # Resolve the bundled repair script: the plugin install dir when running as a
@@ -114,10 +123,8 @@ def extract_trigger_text(transcript_path):
             continue
         if o.get("uuid"):
             uuid_map[o["uuid"]] = o
-        if o.get("isApiErrorMessage"):
-            t = _text(o)
-            if _sig(t) and o.get("parentUuid"):
-                error_parent_uuids.append(o["parentUuid"])
+        if _is_refusal(o) and o.get("parentUuid"):
+            error_parent_uuids.append(o["parentUuid"])
 
     texts = []
     for puuid in error_parent_uuids:
