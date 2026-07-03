@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026.7.14
+
+- **Fix the detector going stale (the bug that silently no-op'd a whole recovery).**
+  The classifier reworded its hard-failure from *"appears to violate our Usage
+  Policy"* to *"…safeguards flagged this message for a cybersecurity topic"* + a
+  `claude.com/form/cyber-use-case` link. Every detection path hard-coded the old
+  string, so `scrub_refusals.py` (all modes) and `detect-false-positive.py` reported
+  **clean** on real refusals. Now both match a `SIGNATURES` list + loose fallback,
+  gated on `isApiErrorMessage:true` + an "API Error" prefix.
+- `--fix-active` now also scrubs the session's **subagent shards**
+  (`<session>/subagents/**/*.jsonl`, incl. `workflows/wf_*/`), with their own
+  backup — it previously touched only the main session file.
+- `detect-false-positive.py` learns a `build-accel` trigger class (compiler
+  internals / warm-cache build acceleration: codegen dedup, generic/share-generics
+  instantiation, walking a toolchain's own source).
+- `tests/smoke.sh` step 5: a signature regression test that detects + scrubs +
+  re-stitches every known wording and holds a negative control — a known signature
+  can no longer go stale unnoticed.
+- SKILL.md documents both error wordings, the drift risk, and the subagent-shard
+  coverage.
+
 ## 2026.6.3
 
 - Recovery hook now surfaces the exact un-stick command (`/model claude-sonnet-4-6`

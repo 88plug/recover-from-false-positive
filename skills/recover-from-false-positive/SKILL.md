@@ -22,6 +22,12 @@ allowed-tools: Bash(python3 *) Read Edit Grep Glob
   features" dispatch in a session saturated with CTI/UEBA/threat/incident/SIGMA.
 - Credential enumeration with NCMEC_ESP_KEY named alongside other _TOKEN/_KEY
   patterns in a grep or subagent prompt.
+- Compiler-internals / warm-cache build acceleration: dense narration of codegen
+  dedup, generic/share-generics instantiation, redundant-compile elimination, or
+  walking a language toolchain's own source (e.g. the Go compiler's
+  `cmd/compile/internal/noder`). The trigger is the low-level vocabulary, not the
+  intent (build acceleration is legitimate). Long sessions saturate and re-fire on
+  `--resume`; start fresh rather than resume.
 - Free model endpoint discovery: Workflow/subagent prompts with dense vocabulary
   around "free", "no key", "no auth", "anonymous", "proxy", "keyless" across 5+
   parallel agent prompts in one turn. Context saturation from a long session
@@ -34,8 +40,20 @@ allowed-tools: Bash(python3 *) Read Edit Grep Glob
 
 Anthropic's API runs an **output classifier** that scores the assistant's tokens
 **at generation time**. On certain dense topics it false-positives and returns a
-hard request failure: *"API Error: ... appears to violate our Usage Policy. This
-request triggered cyber-related safeguards."* The turn dies mid-generation.
+hard request failure. The turn dies mid-generation.
+
+**The wording DRIFTS — do not match a single string.** Known forms so far:
+- *"API Error: … appears to violate our Usage Policy. This request triggered
+  cyber-related safeguards."* (legacy)
+- *"API Error: … safeguards flagged this message for a cybersecurity topic. If
+  your work requires this access, you can apply for an exemption:
+  https://claude.com/form/cyber-use-case?token=…"* (2026-07 onward)
+
+The detector (`scrub_refusals.py` `SIGNATURES` + `detect-false-positive.py`) matches
+a LIST of these plus a loose fallback, gated on `isApiErrorMessage:true` + an
+"API Error" prefix. A single hard-coded phrase once let a whole recovery silently
+report "clean" against the new wording — `tests/smoke.sh` now pins every known
+signature so that can't regress.
 
 Two consequences, two halves of this skill:
 
@@ -114,7 +132,11 @@ TRIGGER = "its back"   # exact text of the message that caused the block
 
 raw = open(path, encoding="utf-8", errors="surrogatepass").read().splitlines()
 
-VIOLATE = "appears to violate our Usage Policy"
+# classifier wording drifts — match a list, not one string
+SIGNATURES = ("appears to violate our Usage Policy",
+              "flagged this message for a cybersecurity topic",
+              "cyber-related safeguards", "cyber-use-case", "safeguards flagged")
+def _sig(t): return isinstance(t, str) and any(s.lower() in t.lower() for s in SIGNATURES)
 
 def _text(o):
     if not isinstance(o, dict): return ""
@@ -130,7 +152,7 @@ for l in raw:
     if not l.strip(): continue
     try: o = json.loads(l)
     except: continue
-    if o.get("isApiErrorMessage") and VIOLATE in _text(o):
+    if o.get("isApiErrorMessage") and _sig(_text(o)):
         remove_parent[o.get("uuid")] = o.get("parentUuid")
     m = o.get("message", {})
     c = m.get("content","") if isinstance(m, dict) else ""
@@ -285,7 +307,13 @@ recommend_action(
 ## Scope notes (Operation B — scrub all)
 
 - Default root is `~/.claude/projects`. Pass `--root DIR` for a different tree.
-- The detector requires BOTH `isApiErrorMessage:true` AND the Usage-Policy text.
+- The detector requires BOTH `isApiErrorMessage:true` AND a known classifier
+  signature (the `SIGNATURES` list — legacy Usage-Policy wording, the 2026-07
+  cyber-safeguards wording, or the loose fallback). Both must hold, so prose that
+  merely quotes a phrase is never touched.
+- `find_targets` recurses (`**/*.jsonl`), so Operation B **does** cover subagent
+  shards under `<session>/subagents/**/`. `--fix-active` also scrubs those shards
+  for the active session (it used to touch only the main file).
 - Pre-existing malformed `.jsonl` lines are left exactly as-is.
 
 ## Prevention (run automatically after cleanup — do not ask)

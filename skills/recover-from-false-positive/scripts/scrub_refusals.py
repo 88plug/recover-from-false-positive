@@ -30,9 +30,39 @@ import argparse, glob, json, os, sys, tarfile, time
 
 # The two-part signature of a REAL refusal turn. Both must hold, so we never
 # touch CLAUDE.md prose that merely quotes the phrase, memory notes, or a
-# transcript where an agent was grepping for it.
-VIOLATE = "appears to violate our Usage Policy"
+# transcript where an agent was grepping for it: (1) isApiErrorMessage:true AND
+# the text starts with "API Error", AND (2) it carries a classifier fingerprint.
+#
+# The classifier's wording DRIFTS over time — hard-coding a single string is what
+# let a whole recovery silently no-op. So we match a LIST of known exact phrases
+# plus a loose fallback. The fallback is safe because it is only ever consulted on
+# a turn already gated by isApiErrorMessage + "API Error" prefix (see is_refusal),
+# so an ordinary API error can't be mistaken for a classifier trip.
+# tests/smoke.sh pins every entry below so a known signature can never go stale.
 API_ERR_PREFIX = "API Error"
+SIGNATURES = (
+    "appears to violate our Usage Policy",             # legacy usage-policy wording
+    "flagged this message for a cybersecurity topic",  # 2026-07 cyber-safeguards wording
+    "cyber-related safeguards",                         # alternate cyber wording
+)
+# Loose fallback markers — catch future rewordings. Only meaningful post-gate.
+_FALLBACK = ("cyber-use-case", "cybersecurity topic", "safeguards flagged")
+# Cheap whole-file / per-line prefilter union (find_targets uses this before parse).
+_ALL_MARKERS = SIGNATURES + _FALLBACK
+
+
+def _sig(t):
+    """True if text carries any known classifier fingerprint (exact or fallback)."""
+    if not isinstance(t, str):
+        return False
+    low = t.lower()
+    return any(s.lower() in low for s in _ALL_MARKERS)
+
+
+def _has_marker(blob):
+    """Cheap substring prefilter over a raw string (file body or one line)."""
+    low = blob.lower()
+    return any(m.lower() in low for m in _ALL_MARKERS)
 
 
 def _text(obj):
@@ -53,7 +83,7 @@ def is_refusal(obj):
     if not isinstance(obj, dict) or not obj.get("isApiErrorMessage"):
         return False
     t = _text(obj)
-    return isinstance(t, str) and VIOLATE in t and t.lstrip().startswith(API_ERR_PREFIX)
+    return _sig(t) and t.lstrip().startswith(API_ERR_PREFIX)
 
 
 def dangling_count(lines):
@@ -135,11 +165,11 @@ def find_targets(root):
             data = open(path, encoding="utf-8", errors="ignore").read()
         except Exception:
             continue
-        if VIOLATE not in data:
+        if not _has_marker(data):
             continue
         # cheap confirm at least one true refusal before full parse
         for l in data.splitlines():
-            if VIOLATE not in l:
+            if not _has_marker(l):
                 continue
             try:
                 if is_refusal(json.loads(l)):
@@ -312,6 +342,33 @@ def main():
         newest = max(targets, key=lambda p: os.path.getmtime(p))
         print(f"Active session: {newest}")
         fix_active(newest, apply=args.apply)
+        # A trip also poisons this session's SUBAGENT shards, which live under
+        # <session-stem>/subagents/**/*.jsonl — fix_active only touches the main
+        # file, so scrub the shards too (chain-safe, self-verifying per file).
+        shard_dir = os.path.splitext(newest)[0]
+        shards = [s for s in glob.glob(os.path.join(shard_dir, "**", "*.jsonl"), recursive=True)
+                  if _has_marker(open(s, encoding="utf-8", errors="ignore").read())]
+        shard_plans = []
+        for s in shards:
+            out, removed, restitched, malformed, delta = scrub_file(s)
+            if removed:
+                shard_plans.append((s, out, removed, delta))
+                print(f"  subagent shard: {removed} refusal(s), delta={delta:+d} {os.path.basename(s)}")
+        if args.apply and shard_plans:
+            stamp = int(time.time())
+            backup = os.path.expanduser(f"~/.claude/refusal-scrub-shards-{stamp}.tar.gz")
+            with tarfile.open(backup, "w:gz") as tar:
+                for s, *_ in shard_plans:
+                    tar.add(s)
+            print(f"  shard backup: {backup}")
+            for s, out, removed, delta in shard_plans:
+                if delta > 0:
+                    print(f"  SKIP shard (+{delta} dangling) {os.path.basename(s)}")
+                    continue
+                tmp = s + ".scrubtmp"
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    fh.write("\n".join(out) + "\n")
+                os.replace(tmp, s)
         if not args.apply:
             print("\nDry run. Re-run with --fix-active --apply to write.")
         return
