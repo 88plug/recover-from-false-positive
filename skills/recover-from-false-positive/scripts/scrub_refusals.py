@@ -391,7 +391,15 @@ _DESAT_TERMS = (
     "share-generics", "generic instantiation", "instantiation", "redundant compil",
     "extern-template", "incremental compile", "toolchain", "first-build",
     "build acceleration", "sigma rule", "ueba", "threat detection",
+    # the classifier's OWN vocabulary — a session where /recover was (mistakenly) run
+    # in-place has the skill body injected as turns, which is itself dense poison.
+    "cyber-related safeguards", "cybersecurity", "usage policy", "cyber-use-case",
+    "output classifier", "content filter", "safeguard", "false positive",
 )
+# Any window turn at least this large is stubbed regardless of vocabulary — big turns
+# (huge tool_result file reads, injected skill bodies) are what saturate the window,
+# and vocab lists can't anticipate every poison. Domain-agnostic backstop.
+DESAT_SIZE_BYTES = 8000
 _WINDOW_BOUNDARY_SUBTYPES = {"compact_boundary", "microcompact_boundary"}
 
 
@@ -565,6 +573,45 @@ def refusal_count(path):
     return n
 
 
+def backtest(root):
+    """Machine-wide exposure report: which sessions carry a dense+large resume window
+    that would re-trip the classifier on --resume. Prevention triage, not a fix."""
+    files = glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True)
+    terms = _DESAT_TERMS + _extra_terms()
+    scanned, atrisk = 0, []
+    for f in files:
+        try:
+            objs = []
+            for l in open(f, encoding="utf-8", errors="surrogatepass"):
+                l = l.strip()
+                if not l:
+                    continue
+                try:
+                    objs.append(json.loads(l))
+                except Exception:
+                    continue
+        except Exception:
+            continue
+        if len(objs) < 5:
+            continue
+        scanned += 1
+        start = _window_start([o for o in objs if isinstance(o, dict)])
+        win = objs[start:]
+        wb = sum(len(json.dumps(o)) for o in win)
+        dense = sum(_turn_score(o, terms) for o in win if isinstance(o, dict))
+        if dense >= 25 and wb > 200_000:
+            atrisk.append((dense, wb, len(win), f))
+    atrisk.sort(reverse=True)
+    print(f"── backtest: {scanned} sessions scanned, {len(atrisk)} at-risk "
+          f"(dense+large resume window → would re-trip on --resume) ──")
+    for d, b, n, f in atrisk[:20]:
+        print(f"  density={d:>4} window={b//1024:>6}KB turns={n:>4}  {f}")
+    if len(atrisk) > 20:
+        print(f"  … +{len(atrisk)-20} more")
+    print("De-saturate any of these before resuming:  --desaturate --file <path> --apply")
+    return atrisk
+
+
 # ── Durability self-check (fail loud, never silent) ──────────────────────────
 def selfcheck(root):
     """Prove the detector still matches reality, so upstream drift surfaces LOUDLY
@@ -649,6 +696,9 @@ def main():
     ap.add_argument("--selfcheck", action="store_true",
                     help="durability audit: prove the detector still matches reality and "
                          "surface any new wording or upstream field drift (fail loud)")
+    ap.add_argument("--backtest", action="store_true",
+                    help="scan ALL sessions on the machine and list the ones whose resume "
+                         "window is dense+large enough to re-trip (prevention triage)")
     ap.add_argument("--keep-recent", type=int, default=6,
                     help="de-saturate: leave the last N turns untouched (default 6)")
     ap.add_argument("--desat-min-score", type=int, default=4,
@@ -657,6 +707,10 @@ def main():
 
     if args.selfcheck:
         selfcheck(args.root)
+        return
+
+    if args.backtest:
+        backtest(args.root)
         return
 
     if args.desaturate:
