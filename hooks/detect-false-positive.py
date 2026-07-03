@@ -8,7 +8,24 @@ Fires at trip time: transcript is live, triggering turn is fresh.
 """
 import json, os, sys, glob, subprocess
 
-VIOLATE = "appears to violate our Usage Policy"
+# The classifier's wording drifts — match a LIST of known phrases plus a loose
+# fallback, never a single hard-coded string (a stale string silently no-ops the
+# whole detector). Only consulted on turns already flagged isApiErrorMessage.
+SIGNATURES = (
+    "appears to violate our Usage Policy",             # legacy usage-policy wording
+    "flagged this message for a cybersecurity topic",  # 2026-07 cyber-safeguards wording
+    "cyber-related safeguards",                         # alternate cyber wording
+)
+_FALLBACK = ("cyber-use-case", "cybersecurity topic", "safeguards flagged")
+
+
+def _sig(t):
+    if not isinstance(t, str):
+        return False
+    low = t.lower()
+    return any(s.lower() in low for s in (SIGNATURES + _FALLBACK))
+
+
 STATE_FILE = os.path.expanduser("~/.claude/.fp-state.json")
 GLOBAL_CLAUDE_MD = os.path.expanduser("~/.claude/CLAUDE.md")
 # Resolve the bundled repair script: the plugin install dir when running as a
@@ -32,6 +49,11 @@ KNOWN_TRIGGER_CLASSES = {
     "credential-enum": ["ncmec","esp_key","token","secret","credential"],
     # SSH + docker fleet deployment into multiple IPs co-located with mining vocab
     "fleet-ssh": ["stricthostkeychecking=no","for ip in","docker inspect","docker pull","192.168"],
+    # compiler-internals / warm-cache build acceleration — codegen dedup, generic
+    # instantiation, walking a toolchain's own source (e.g. Go cmd/compile/noder)
+    "build-accel": ["codegen","noder","cmd/compile","share-generics","generic instantiation",
+                    "redundant compil","instantiation","warm-cache","first-build",
+                    "build acceleration","extern-template","incremental compile","toolchain"],
 }
 
 
@@ -94,7 +116,7 @@ def extract_trigger_text(transcript_path):
             uuid_map[o["uuid"]] = o
         if o.get("isApiErrorMessage"):
             t = _text(o)
-            if VIOLATE in t and o.get("parentUuid"):
+            if _sig(t) and o.get("parentUuid"):
                 error_parent_uuids.append(o["parentUuid"])
 
     texts = []
