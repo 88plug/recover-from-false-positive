@@ -162,4 +162,17 @@ mkdir -p /tmp/rfp-selfcheck-$$/proj && : > /tmp/rfp-selfcheck-$$/proj/empty.json
 python3 "$ROOT/skills/recover-from-false-positive/scripts/scrub_refusals.py" --selfcheck --root /tmp/rfp-selfcheck-$$ | grep -q "detection contract" && echo "   self-check reported" || { echo "   self-check FAILED"; exit 1; }
 rm -rf /tmp/rfp-selfcheck-$$
 
+echo "9. backtest runs over a tree and reports exposure"
+D=/tmp/rfp-backtest-$$/proj; mkdir -p "$D"
+python3 - "$D/s.jsonl" <<'PY'
+import json,sys
+dense=("codegen cmd/compile share-generics instantiation toolchain redundant compilation ")*400
+rows=[{"uuid":"S","parentUuid":None,"type":"system","subtype":"microcompact_boundary","content":"b"}]
+for i in range(6):
+    rows.append({"uuid":f"u{i}","parentUuid":"S","type":"user","message":{"role":"user","content":dense}})
+open(sys.argv[1],"w").write("\n".join(json.dumps(r) for r in rows)+"\n")
+PY
+python3 "$ROOT/skills/recover-from-false-positive/scripts/scrub_refusals.py" --backtest --root /tmp/rfp-backtest-$$ | grep -q "at-risk" && echo "   backtest reported" || { echo "   backtest FAILED"; exit 1; }
+rm -rf /tmp/rfp-backtest-$$
+
 echo "smoke OK"

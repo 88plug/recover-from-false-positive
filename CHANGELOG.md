@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026.7.16
+
+Make de-saturation the default first move, and answer "never close the session".
+
+- **De-saturation is now the documented FIRST recovery step** (SKILL.md "Primary
+  recovery"), not model-switching — model switch does nothing (classifier is
+  family-wide) and `/compact` trips on the poison. Never run this skill inside the
+  stuck session (cascade); run it from a clean sibling.
+- **Deep-dive result on live in-place recovery:** an already-saturated live session
+  cannot be de-poisoned while keeping full context and staying open — the harness
+  owns the in-memory message array, no hook trims it mid-flight, `/compact` is a
+  generation over the poison, and the native refusal fallback's "bridge" lane is a
+  model switch. Verified against the installed binary. The durable answer is
+  PREVENTION: `references/never-close.md` — cap `CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS`,
+  lower the auto-compact window (earlier local microcompact), and use context editing
+  (`clear_tool_uses_20250919`) so the window never saturates.
+- **`--backtest`**: scan every session on the machine and list the ones whose resume
+  window is dense+large enough to re-trip (prevention triage).
+- De-saturate scorer widened: classifier's own vocabulary + a domain-agnostic size
+  backstop (`DESAT_SIZE_BYTES`) so it also catches injected skill bodies and huge
+  tool reads, not just one project's terms.
+
 ## 2026.7.15
 
 Durability + the fix that actually revives a stuck session.
