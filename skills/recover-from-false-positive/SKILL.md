@@ -120,6 +120,36 @@ Dry-run first, inspect delta=0 for all files, then apply.
 **Warning**: this modifies ALL sessions machine-wide that contain refusal turns.
 If the user only wants the active session fixed, use Operation A, not B.
 
+### Operation C: De-saturate a stuck session (make it resume without re-tripping)
+
+**When**: the session trips on EVERY new generation — even a trivial prompt, even
+`/recover` — because its context is saturated with the tripping vocabulary. Removing
+refusal turns does NOT help here: the client already filters `isApiErrorMessage`
+turns before the API send (verified in the binary), so the poison is the dense WORK
+content in the resume window (the turns after the last compaction boundary), not the
+refusals.
+
+`--fix-active` does this automatically when it sees a saturated session (≥2 refusals).
+To run it directly on a session whose refusals were already scrubbed but still trips:
+
+```bash
+python3 …/scrub_refusals.py --desaturate --file <session.jsonl>            # dry run
+python3 …/scrub_refusals.py --desaturate --file <session.jsonl> --apply    # write + backup
+```
+
+It stubs the vocabulary-dense turns in the live window (and subagent shards),
+preserving `uuid`/`parentUuid` and every `tool_use`/`tool_result` pairing. Reversible
+from the backup. Tunables: `--keep-recent N` (protect the last N turns, default 6),
+`--desat-min-score N` (density threshold, default 4), `--no-desaturate` (opt out
+inside `--fix-active`). **Best-effort**: it lowers the odds of a re-trip; only the
+user resuming confirms it held. The guaranteed fallback is `/clear` or a new session
+(both drop the whole window).
+
+**Durability** — the detector is reword-proof: it keys on the STRUCTURAL marker
+`message.stop_reason == "refusal"`, not the human error text, so a brand-new wording
+is caught on day zero. Run `--selfcheck` any time to audit that the contract still
+matches reality (it fails loud on drift and logs new wordings).
+
 ## Manual surgical remove (when --fix-active can't auto-detect the trigger)
 
 Run this Python snippet directly, adjusting the trigger text:

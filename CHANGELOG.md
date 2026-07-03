@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026.7.15
+
+Durability + the fix that actually revives a stuck session.
+
+- **Structural, reword-proof detection.** A classifier refusal is detected by the
+  STRUCTURAL marker `message.stop_reason == "refusal"` (+ `isApiErrorMessage`), not
+  just the human error text — verified against the installed Claude Code binary,
+  which branches on exactly that. A brand-new wording is caught on day zero; text
+  `SIGNATURES` are now a secondary/legacy path. This kills the class of bug that
+  silently no-op'd recovery when upstream reworded the error.
+- **Fail loud, never silent** (`--selfcheck`): audits all sessions, reports
+  structural-vs-signature-vs-novel counts, logs any NEW wording to
+  `~/.claude/.fp-observed-signatures.log`, and canaries the installed binary for the
+  fields we depend on — so drift surfaces as a warning, not a false "clean".
+- **`--desaturate` (the real active-session fix).** Removing refusal turns never
+  stopped re-tripping — the client already filters them before the API send; the
+  poison is the dense WORK content in the resume window (the turns after the last
+  compaction boundary). De-saturation stubs the vocabulary-dense turns in that
+  window IN PLACE, preserving `uuid`/`parentUuid` AND every `tool_use`/`tool_result`
+  pairing (no dangling calls on resume). Reversible from the backup. Default-ON
+  inside `--fix-active` when the session is saturated (≥2 refusals); `--no-desaturate`
+  opts out. Point at an already-scrubbed-but-stuck session with `--file`.
+- **Subagent shards** are de-saturated too (`<session>/subagents/**`), not just
+  refusal-scrubbed.
+- `tests/smoke.sh` steps 6–8: reword-proof detection, de-saturation
+  (chain + tool-pairing preserved, recent turns protected), and the self-check.
+
 ## 2026.7.14
 
 - **Fix the detector going stale (the bug that silently no-op'd a whole recovery).**

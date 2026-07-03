@@ -96,4 +96,70 @@ if fails:
 print(f"   {len(CASES)} signatures detected + scrubbed; negative control held")
 PY
 
+echo "6. durability — a NEVER-SEEN wording is still caught structurally (stop_reason=refusal)"
+# This is the real anti-fragility test: even if Anthropic invents a brand-new error
+# phrase tomorrow, the structural marker catches it and a benign 500 is left alone.
+python3 - "$ROOT" <<'PY'
+import importlib.util, os, sys
+root=sys.argv[1]
+spec=importlib.util.spec_from_file_location("scrub", os.path.join(root,"skills/recover-from-false-positive/scripts/scrub_refusals.py"))
+scrub=importlib.util.module_from_spec(spec); spec.loader.exec_module(scrub)
+fails=[]
+novel={"uuid":"R","parentUuid":"U","type":"assistant","isApiErrorMessage":True,
+       "message":{"role":"assistant","stop_reason":"refusal","model":"<synthetic>",
+                  "content":[{"type":"text","text":"API Error: a totally new 2027 phrasing no one has hard-coded."}]}}
+if not scrub.is_refusal(novel): fails.append("structural refusal (new wording) MISSED")
+if not scrub.is_novel_wording(novel): fails.append("new wording not flagged as novel")
+benign={"uuid":"E","type":"assistant","isApiErrorMessage":True,
+        "message":{"role":"assistant","stop_reason":"end_turn",
+                   "content":[{"type":"text","text":"API Error: 500 Internal server error"}]}}
+if scrub.is_refusal(benign): fails.append("benign 500 wrongly flagged as refusal")
+if fails: print("   REGRESSION:"); [print("     -",x) for x in fails]; sys.exit(1)
+print("   new-wording caught structurally; benign 500 left alone")
+PY
+
+echo "7. de-saturate — dense window turns stubbed, chain + tool-pairing preserved"
+python3 - "$ROOT" <<'PY'
+import importlib.util, json, os, sys
+root=sys.argv[1]
+spec=importlib.util.spec_from_file_location("scrub", os.path.join(root,"skills/recover-from-false-positive/scripts/scrub_refusals.py"))
+scrub=importlib.util.module_from_spec(spec); spec.loader.exec_module(scrub)
+dense=("codegen noder cmd/compile share-generics instantiation redundant compilation "
+       "toolchain first-build build acceleration ")*6
+def turn(u,p,typ,role,content,**kw):
+    return json.dumps({"uuid":u,"parentUuid":p,"type":typ,"message":{"role":role,"content":content},**kw})
+raw=[
+  json.dumps({"uuid":"S","parentUuid":None,"type":"system","subtype":"microcompact_boundary","content":"b"}),
+  turn("A","S","assistant","assistant",[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"go build"}}]),
+  turn("B","A","user","user",[{"type":"tool_result","tool_use_id":"tu1","content":dense}]),
+  turn("C","B","assistant","assistant",[{"type":"text","text":dense}]),
+  turn("D","C","user","user","a short recent question"),
+]
+out,stubbed,saved,manifest=scrub.desaturate_lines(raw, keep_recent=1, min_score=4)
+fails=[]
+if stubbed<2: fails.append(f"stubbed={stubbed} (want >=2: the dense tool_result + text turns)")
+if saved<=0: fails.append("bytes_saved not positive")
+objs=[json.loads(l) for l in out]
+by={o["uuid"]:o for o in objs}
+if len(objs)!=len(raw): fails.append("turn count changed (chain risk)")
+if scrub.dangling_count(out)-scrub.dangling_count(raw)>0: fails.append("dangling pointers increased")
+# tool pairing preserved: tool_use id + tool_result tool_use_id intact, types unchanged
+a=by["A"]["message"]["content"][0]
+b=by["B"]["message"]["content"][0]
+if a.get("type")!="tool_use" or a.get("id")!="tu1": fails.append("tool_use block mangled")
+if b.get("type")!="tool_result" or b.get("tool_use_id")!="tu1": fails.append("tool_result pairing broken")
+if b.get("content")==dense: fails.append("dense tool_result not stubbed")
+# protected recent turn D untouched
+if by["D"]["message"]["content"]!="a short recent question": fails.append("protected recent turn was altered")
+# parent chain unchanged
+if by["C"]["parentUuid"]!="B" or by["B"]["parentUuid"]!="A": fails.append("parentUuid rewritten")
+if fails: print("   REGRESSION:"); [print("     -",x) for x in fails]; sys.exit(1)
+print(f"   {stubbed} dense turns stubbed, ~{saved}B freed, chain + tool pairing intact, recent turn protected")
+PY
+
+echo "8. self-check runs and reports (fail-loud durability audit)"
+mkdir -p /tmp/rfp-selfcheck-$$/proj && : > /tmp/rfp-selfcheck-$$/proj/empty.jsonl
+python3 "$ROOT/skills/recover-from-false-positive/scripts/scrub_refusals.py" --selfcheck --root /tmp/rfp-selfcheck-$$ | grep -q "detection contract" && echo "   self-check reported" || { echo "   self-check FAILED"; exit 1; }
+rm -rf /tmp/rfp-selfcheck-$$
+
 echo "smoke OK"

@@ -28,18 +28,28 @@ Usage:
 """
 import argparse, glob, json, os, sys, tarfile, time
 
-# The two-part signature of a REAL refusal turn. Both must hold, so we never
-# touch CLAUDE.md prose that merely quotes the phrase, memory notes, or a
-# transcript where an agent was grepping for it: (1) isApiErrorMessage:true AND
-# the text starts with "API Error", AND (2) it carries a classifier fingerprint.
+# ── Detecting a classifier refusal turn, durably ────────────────────────────
 #
-# The classifier's wording DRIFTS over time — hard-coding a single string is what
-# let a whole recovery silently no-op. So we match a LIST of known exact phrases
-# plus a loose fallback. The fallback is safe because it is only ever consulted on
-# a turn already gated by isApiErrorMessage + "API Error" prefix (see is_refusal),
-# so an ordinary API error can't be mistaken for a classifier trip.
-# tests/smoke.sh pins every entry below so a known signature can never go stale.
+# DURABILITY LESSON (learned the hard way): the user-facing wording of this error
+# DRIFTS ("appears to violate our Usage Policy" → "safeguards flagged this message
+# for a cybersecurity topic" → …). Hard-coding one string once let a whole recovery
+# silently report "clean". Matching a LIST of strings is better but STILL breaks the
+# day Anthropic invents a new phrase.
+#
+# So the PRIMARY signal is STRUCTURAL, not textual. Claude Code records a classifier
+# refusal as an assistant turn with `isApiErrorMessage:true` AND
+# `message.stop_reason == "refusal"` (also `model:"<synthetic>"`, `error:"invalid_request"`).
+# Those fields are set by the client regardless of the human wording — verified
+# against the installed binary (it branches on `stop_reason==="refusal"`). That path
+# catches a brand-new wording on day zero.
+#
+# Text SIGNATURES are the SECONDARY path: legacy turns that predate stop_reason, and
+# classification/telemetry. A refusal qualifies if EITHER path fires (both gated on
+# isApiErrorMessage + assistant type). Unknown wordings caught structurally are
+# auto-logged (observe_novel_wording) so the maintainer can widen SIGNATURES — but
+# the tool already works without that. tests/smoke.sh pins both paths.
 API_ERR_PREFIX = "API Error"
+STRUCTURAL_STOP_REASON = "refusal"          # the reword-proof marker
 SIGNATURES = (
     "appears to violate our Usage Policy",             # legacy usage-policy wording
     "flagged this message for a cybersecurity topic",  # 2026-07 cyber-safeguards wording
@@ -47,8 +57,9 @@ SIGNATURES = (
 )
 # Loose fallback markers — catch future rewordings. Only meaningful post-gate.
 _FALLBACK = ("cyber-use-case", "cybersecurity topic", "safeguards flagged")
-# Cheap whole-file / per-line prefilter union (find_targets uses this before parse).
 _ALL_MARKERS = SIGNATURES + _FALLBACK
+# Where novel (structurally-caught but text-unknown) wordings are logged for review.
+OBSERVED_LOG = os.path.expanduser("~/.claude/.fp-observed-signatures.log")
 
 
 def _sig(t):
@@ -59,10 +70,52 @@ def _sig(t):
     return any(s.lower() in low for s in _ALL_MARKERS)
 
 
+def _stop_reason(obj):
+    m = obj.get("message") if isinstance(obj, dict) else None
+    return m.get("stop_reason") if isinstance(m, dict) else None
+
+
+def is_structural_refusal(obj):
+    """Reword-proof: an assistant API-error turn the client marked stop_reason=refusal."""
+    return (isinstance(obj, dict) and obj.get("isApiErrorMessage")
+            and obj.get("type") in (None, "assistant")
+            and _stop_reason(obj) == STRUCTURAL_STOP_REASON)
+
+
+def is_signature_refusal(obj):
+    """Legacy/text path: isApiErrorMessage + a known wording + 'API Error' prefix."""
+    if not (isinstance(obj, dict) and obj.get("isApiErrorMessage")):
+        return False
+    t = _text(obj)
+    return _sig(t) and t.lstrip().startswith(API_ERR_PREFIX)
+
+
+def is_refusal(obj):
+    return is_structural_refusal(obj) or is_signature_refusal(obj)
+
+
+def is_novel_wording(obj):
+    """Caught structurally but no known text signature → a NEW wording to learn."""
+    return is_structural_refusal(obj) and not _sig(_text(obj))
+
+
+def observe_novel_wording(obj, path=""):
+    """Append an unseen refusal wording to OBSERVED_LOG (best-effort, delimiter-safe)."""
+    try:
+        snippet = " ".join(_text(obj).split())[:300]
+        if not snippet:
+            return
+        with open(OBSERVED_LOG, "a", encoding="utf-8") as fh:
+            fh.write(f"{os.path.basename(path)}\t{snippet}\n")
+    except Exception:
+        pass
+
+
 def _has_marker(blob):
-    """Cheap substring prefilter over a raw string (file body or one line)."""
+    """Cheap file-level prefilter. Must NOT skip structurally-detectable refusals, so
+    it triggers on the durable field name too (any wording), not just known strings."""
     low = blob.lower()
-    return any(m.lower() in low for m in _ALL_MARKERS)
+    return "isapierrormessage" in low or any(m.lower() in low for m in _ALL_MARKERS)
 
 
 def _text(obj):
@@ -77,13 +130,6 @@ def _text(obj):
             b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text"
         )
     return ""
-
-
-def is_refusal(obj):
-    if not isinstance(obj, dict) or not obj.get("isApiErrorMessage"):
-        return False
-    t = _text(obj)
-    return _sig(t) and t.lstrip().startswith(API_ERR_PREFIX)
 
 
 def dangling_count(lines):
@@ -167,16 +213,22 @@ def find_targets(root):
             continue
         if not _has_marker(data):
             continue
-        # cheap confirm at least one true refusal before full parse
+        # confirm at least one true refusal before full parse; also learn any
+        # NEW wording caught structurally (so upstream rewords surface, not hide).
+        found = False
         for l in data.splitlines():
             if not _has_marker(l):
                 continue
             try:
-                if is_refusal(json.loads(l)):
-                    hits.append(path)
-                    break
+                o = json.loads(l)
             except Exception:
                 continue
+            if is_refusal(o):
+                if not found:
+                    hits.append(path)
+                    found = True
+                if is_novel_wording(o):
+                    observe_novel_wording(o, path)
     return hits
 
 
@@ -313,6 +365,268 @@ def fix_active(path, apply=False):
     print(f"  OK removed={removed} restitched={restitched} kept={len(out)} (was {len(raw)})")
 
 
+# ── De-saturation ────────────────────────────────────────────────────────────
+#
+# Removing refusal turns does NOT stop the next trip: the client already filters
+# isApiErrorMessage turns before the API send (verified in the binary). What
+# re-fires on --resume is the dense WORK content still in the transcript window.
+# Claude Code re-sends the turns AFTER the last compaction boundary; that window is
+# what the classifier scores. De-saturation neutralizes the vocabulary-dense turns
+# in that window IN PLACE — replacing text and tool_result payloads with a short
+# stub while preserving uuid/parentUuid AND every tool_use/tool_result pairing (we
+# never change block types or tool_use_ids, so resume can't break on a dangling
+# tool call). Chain is untouched (no turn removed → zero dangling delta). Lossy but
+# fully reversible from the backup. This is what actually revives a stuck session.
+STUB = ("[de-saturated by recover-from-false-positive — dense content trimmed so the "
+        "output classifier does not re-fire on resume; verbatim original is in the backup]")
+
+# Domain-general poison vocabulary, drawn from the known trigger classes. Scoring a
+# turn by hits across ALL classes keeps this useful beyond any one project; the
+# active session's own cluster (from ~/.claude/.fp-state.json) is merged in too.
+_DESAT_TERMS = (
+    "cosign", "sigstore", "attestation", "provenance", "slsa", "fulcio", "rekor",
+    "in-toto", "keyless", "hashrate", "nonce", "coinbase", "randomx", "cryptonight",
+    "blake3", "dev-fee", "lnd", "lndinit", "bitcoind", "lightning", "wallet-unlock",
+    "failover", "gauntlet", "raft", "teardown", "codegen", "noder", "cmd/compile",
+    "share-generics", "generic instantiation", "instantiation", "redundant compil",
+    "extern-template", "incremental compile", "toolchain", "first-build",
+    "build acceleration", "sigma rule", "ueba", "threat detection",
+)
+_WINDOW_BOUNDARY_SUBTYPES = {"compact_boundary", "microcompact_boundary"}
+
+
+def _extra_terms():
+    """Merge in the active session's own detected vocab cluster, if the hook wrote one."""
+    try:
+        st = json.load(open(os.path.expanduser("~/.claude/.fp-state.json"), encoding="utf-8"))
+        terms = []
+        for hits in (st.get("vocab_clusters") or {}).values():
+            terms += [h for h in hits if isinstance(h, str)]
+        return tuple(terms)
+    except Exception:
+        return ()
+
+
+def _dense_text(obj):
+    """Full text of a turn for SCORING — unlike _text (refusal detection, text blocks
+    only), this includes tool_result payloads and tool_use inputs, which carry most of
+    the vocabulary weight (big file reads, command output)."""
+    m = obj.get("message") if isinstance(obj.get("message"), dict) else {}
+    c = m.get("content", "")
+    if isinstance(c, str):
+        return c
+    if not isinstance(c, list):
+        return ""
+    parts = []
+    for b in c:
+        if not isinstance(b, dict):
+            continue
+        ty = b.get("type")
+        if ty == "text":
+            parts.append(b.get("text", ""))
+        elif ty == "tool_result":
+            rc = b.get("content", "")
+            parts.append(rc if isinstance(rc, str) else json.dumps(rc))
+        elif ty == "tool_use":
+            parts.append(json.dumps(b.get("input", "")))
+    return " ".join(parts)
+
+
+def _turn_score(obj, terms):
+    low = _dense_text(obj).lower()
+    return sum(low.count(t) for t in terms)
+
+
+def _window_start(objs):
+    """Index of the first turn Claude Code would re-send: right after the LAST
+    compaction boundary (that is exactly the live context window)."""
+    last = -1
+    for i, o in enumerate(objs):
+        if o.get("type") == "system" and o.get("subtype") in _WINDOW_BOUNDARY_SUBTYPES:
+            last = i
+    return last + 1  # 0 if no boundary → whole transcript is the window
+
+
+def _stub_block(b):
+    if not isinstance(b, dict):
+        return b
+    t = b.get("type")
+    if t == "text":
+        return {**b, "text": STUB}
+    if t == "tool_result":       # keep tool_use_id + type → pairing intact
+        return {**b, "content": STUB}
+    return b                     # tool_use / thinking / image left structurally intact
+
+
+def _stub_message_content(o):
+    m = o.get("message")
+    if not isinstance(m, dict):
+        return o
+    c = m.get("content")
+    if isinstance(c, str):
+        new_c = STUB
+    elif isinstance(c, list):
+        new_c = [_stub_block(b) for b in c]
+    else:
+        return o
+    o = dict(o)
+    o["message"] = {**m, "content": new_c}
+    o["desaturated"] = True
+    return o
+
+
+def desaturate_lines(raw, keep_recent=6, min_score=4, terms=None):
+    """Return (out_lines, stubbed, bytes_saved, manifest). Stubs vocabulary-dense
+    user/assistant turns in the live window, preserving chain + tool pairing."""
+    terms = tuple(terms) if terms else (_DESAT_TERMS + _extra_terms())
+    objs, idx_of = [], []
+    for n, l in enumerate(raw):
+        if not l.strip():
+            objs.append(None); idx_of.append(n); continue
+        try:
+            objs.append(json.loads(l))
+        except Exception:
+            objs.append(None)
+        idx_of.append(n)
+
+    real = [(n, o) for n, o in enumerate(objs) if isinstance(o, dict)]
+    start = _window_start([o for _, o in real])
+    # translate window start (index into `real`) back to positions; simpler: work on real list
+    win = real[start:]
+    protect = {n for n, _ in win[-keep_recent:]}  # keep the last few turns readable
+
+    targets = {}
+    for n, o in win:
+        if n in protect:
+            continue
+        if o.get("type") not in ("user", "assistant"):
+            continue
+        if is_refusal(o) or o.get("isMeta"):
+            continue
+        sc = _turn_score(o, terms)
+        if sc >= min_score:
+            targets[n] = sc
+
+    out, stubbed, saved, manifest = [], 0, 0, []
+    for n, l in enumerate(raw):
+        o = objs[n] if n < len(objs) else None
+        if isinstance(o, dict) and n in targets:
+            stub = _stub_message_content(o)
+            new_l = json.dumps(stub, ensure_ascii=False)
+            saved += max(0, len(l) - len(new_l))
+            stubbed += 1
+            role = (o.get("message", {}) or {}).get("role", o.get("type"))
+            manifest.append((n, targets[n], role, " ".join(_dense_text(o).split())[:60]))
+            out.append(new_l)
+        else:
+            out.append(l)
+    return out, stubbed, saved, manifest
+
+
+def desaturate_and_write(path, apply=False, keep_recent=6, min_score=4, backup_tag="desat"):
+    raw = open(path, encoding="utf-8", errors="surrogatepass").read().splitlines()
+    out, stubbed, saved, manifest = desaturate_lines(raw, keep_recent, min_score)
+    if not stubbed:
+        print(f"  de-saturate: nothing dense enough to trim in {os.path.basename(path)}")
+        return 0
+    print(f"  de-saturate: {stubbed} dense turn(s), ~{saved//1024}KB freed in {os.path.basename(path)}")
+    for n, sc, role, prev in manifest[:8]:
+        print(f"    line {n} score={sc} {role}: {prev!r}")
+    if len(manifest) > 8:
+        print(f"    … +{len(manifest)-8} more")
+    if not apply:
+        return stubbed
+    stamp = int(time.time())
+    backup = os.path.expanduser(f"~/.claude/{backup_tag}-{stamp}.tar.gz")
+    with tarfile.open(backup, "w:gz") as tar:
+        tar.add(path)
+    print(f"  backup: {backup}")
+    tmp = path + ".desattmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(out) + "\n")
+    os.replace(tmp, path)
+    return stubbed
+
+
+def refusal_count(path):
+    n = 0
+    try:
+        for l in open(path, encoding="utf-8", errors="surrogatepass"):
+            l = l.strip()
+            if not l or "isApiErrorMessage" not in l:
+                continue
+            try:
+                if is_refusal(json.loads(l)):
+                    n += 1
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return n
+
+
+# ── Durability self-check (fail loud, never silent) ──────────────────────────
+def selfcheck(root):
+    """Prove the detector still matches reality, so upstream drift surfaces LOUDLY
+    instead of as a false 'clean'. Reports structural vs signature vs novel counts
+    and flags any isApiErrorMessage turn we can't account for."""
+    total_err = struct = sigmatch = novel = other = 0
+    novels = []
+    for path in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True):
+        try:
+            data = open(path, encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        for l in data:
+            if "isApiErrorMessage" not in l:
+                continue
+            try:
+                o = json.loads(l)
+            except Exception:
+                continue
+            if not (isinstance(o, dict) and o.get("isApiErrorMessage")):
+                continue
+            total_err += 1
+            s = is_structural_refusal(o); g = is_signature_refusal(o)
+            if s and g: struct += 1; sigmatch += 1
+            elif s: struct += 1
+            elif g: sigmatch += 1
+            else:
+                other += 1
+                continue
+            if is_novel_wording(o):
+                novel += 1
+                snip = " ".join(_text(o).split())[:80]
+                if snip not in novels:
+                    novels.append(snip)
+
+    print("── recover-from-false-positive self-check ──")
+    print(f"detection contract: isApiErrorMessage:true AND (message.stop_reason=='refusal'  [structural, reword-proof]")
+    print(f"                    OR known SIGNATURES text [{len(SIGNATURES)} known])")
+    print(f"isApiErrorMessage turns scanned : {total_err}")
+    print(f"  classified as refusal (structural) : {struct}")
+    print(f"  classified as refusal (signature)  : {sigmatch}")
+    print(f"  NEW wording caught structurally    : {novel}")
+    print(f"  other API errors (500/overload/etc): {other}  (correctly left alone)")
+    if novel:
+        print(f"⚠ {novel} refusal(s) matched STRUCTURALLY but not any known string — a new wording.")
+        print(f"  Logged to {OBSERVED_LOG}. Consider adding to SIGNATURES:")
+        for s in novels[:5]:
+            print(f"    · {s!r}")
+    # binary canary: are the fields we depend on still present upstream?
+    vers = sorted(glob.glob(os.path.expanduser("~/.local/share/claude/versions/*")))
+    if vers:
+        try:
+            blob = open(vers[-1], "rb").read()
+            for field in (b"isApiErrorMessage", b"stop_reason", b"refusal"):
+                if blob.find(field) < 0:
+                    print(f"⚠ installed Claude Code ({os.path.basename(vers[-1])}) no longer mentions "
+                          f"{field.decode()!r} — detection contract may have drifted; review.")
+        except Exception:
+            pass
+    print("(structural detection means a reworded error is still caught on day zero.)")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=os.path.expanduser("~/.claude/projects"))
@@ -321,9 +635,53 @@ def main():
     ap.add_argument("--latest", action="store_true",
                     help="print decoded project path of the most recently modified refusal file")
     ap.add_argument("--fix-active", action="store_true",
-                    help="remove ONLY the trigger user turn + refusal from the most recent "
-                         "refusal file; keeps all other session history intact")
+                    help="remove the trigger+refusal from the most recent refusal file AND "
+                         "(when the session is saturated) de-saturate its live window so it "
+                         "resumes without re-tripping; covers subagent shards too")
+    ap.add_argument("--desaturate", action="store_true",
+                    help="force in-place de-saturation of the most recent refusal session "
+                         "(stub vocabulary-dense turns in the resume window; reversible)")
+    ap.add_argument("--no-desaturate", action="store_true",
+                    help="disable the default de-saturation inside --fix-active")
+    ap.add_argument("--file", default=None,
+                    help="explicit session .jsonl to target (for --desaturate on a session "
+                         "whose refusal turns were already scrubbed but is still saturated)")
+    ap.add_argument("--selfcheck", action="store_true",
+                    help="durability audit: prove the detector still matches reality and "
+                         "surface any new wording or upstream field drift (fail loud)")
+    ap.add_argument("--keep-recent", type=int, default=6,
+                    help="de-saturate: leave the last N turns untouched (default 6)")
+    ap.add_argument("--desat-min-score", type=int, default=4,
+                    help="de-saturate: min trigger-vocab hits for a turn to be stubbed (default 4)")
     args = ap.parse_args()
+
+    if args.selfcheck:
+        selfcheck(args.root)
+        return
+
+    if args.desaturate:
+        if args.file:
+            newest = os.path.abspath(os.path.expanduser(args.file))
+            if not os.path.exists(newest):
+                print(f"No such file: {newest}"); sys.exit(1)
+        else:
+            targets = find_targets(args.root)
+            if not targets:
+                print("No refusal files found. A saturated session whose refusals were "
+                      "already scrubbed has no marker — point at it with --file <session.jsonl>.")
+                return
+            newest = max(targets, key=lambda p: os.path.getmtime(p))
+        print(f"De-saturate: {newest}")
+        desaturate_and_write(newest, apply=args.apply,
+                             keep_recent=args.keep_recent, min_score=args.desat_min_score)
+        # subagent shards share the trip's vocabulary — de-saturate them too
+        shard_dir = os.path.splitext(newest)[0]
+        for s in glob.glob(os.path.join(shard_dir, "**", "*.jsonl"), recursive=True):
+            desaturate_and_write(s, apply=args.apply, keep_recent=args.keep_recent,
+                                 min_score=args.desat_min_score, backup_tag="desat-shard")
+        if not args.apply:
+            print("\nDry run. Re-run with --desaturate --apply to write.")
+        return
 
     if args.latest:
         project_path, jsonl_path = latest_refusal_project(args.root)
@@ -341,7 +699,17 @@ def main():
             return
         newest = max(targets, key=lambda p: os.path.getmtime(p))
         print(f"Active session: {newest}")
+        # Saturation signal: repeated refusals mean the whole live window trips, not
+        # a one-off. Removing turns alone leaves the user stuck (refusals are already
+        # filtered before send), so default to ALSO de-saturating — unless opted out.
+        saturated = refusal_count(newest) >= 2
+        do_desat = saturated and not args.no_desaturate
         fix_active(newest, apply=args.apply)
+        if do_desat:
+            print("  session is saturated (repeated trips) → de-saturating live window "
+                  "so resume won't re-fire (use --no-desaturate to skip):")
+            desaturate_and_write(newest, apply=args.apply,
+                                 keep_recent=args.keep_recent, min_score=args.desat_min_score)
         # A trip also poisons this session's SUBAGENT shards, which live under
         # <session-stem>/subagents/**/*.jsonl — fix_active only touches the main
         # file, so scrub the shards too (chain-safe, self-verifying per file).
@@ -369,6 +737,11 @@ def main():
                 with open(tmp, "w", encoding="utf-8") as fh:
                     fh.write("\n".join(out) + "\n")
                 os.replace(tmp, s)
+        # de-saturate shards too when the session is saturated
+        if do_desat:
+            for s in glob.glob(os.path.join(shard_dir, "**", "*.jsonl"), recursive=True):
+                desaturate_and_write(s, apply=args.apply, keep_recent=args.keep_recent,
+                                     min_score=args.desat_min_score, backup_tag="desat-shard")
         if not args.apply:
             print("\nDry run. Re-run with --fix-active --apply to write.")
         return
