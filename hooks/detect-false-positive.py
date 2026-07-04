@@ -27,12 +27,21 @@ def _sig(t):
 
 
 def _is_refusal(o):
-    """Reword-proof: structural (message.stop_reason == 'refusal') OR a known wording.
-    The structural path fires on a brand-new wording the day it ships."""
+    """Reword-proof + all-edges: structural via message.stop_reason=='refusal' OR
+    stop_details.type=='refusal' (category-agnostic — fires on cyber, weapons, or any
+    future category on day zero), OR a known text wording as a legacy fallback."""
     if not (isinstance(o, dict) and o.get("isApiErrorMessage")):
         return False
     m = o.get("message") if isinstance(o.get("message"), dict) else {}
-    return m.get("stop_reason") == "refusal" or _sig(_text(o))
+    sd = m.get("stop_details") if isinstance(m.get("stop_details"), dict) else {}
+    return (m.get("stop_reason") == "refusal" or sd.get("type") == "refusal"
+            or _sig(_text(o)))
+
+
+def _refusal_category(o):
+    m = o.get("message") if isinstance(o.get("message"), dict) else {}
+    sd = m.get("stop_details") if isinstance(m.get("stop_details"), dict) else {}
+    return sd.get("category")
 
 
 STATE_FILE = os.path.expanduser("~/.claude/.fp-state.json")
@@ -105,14 +114,16 @@ def _text(obj):
 
 
 def extract_trigger_text(transcript_path):
-    """Return text of the assistant turn immediately before the error turn."""
+    """Return (trigger_text, categories): the text of the turn(s) that triggered each
+    refusal (its parent) and the set of server categories that fired (cyber/weapons/…)."""
     try:
         lines = open(transcript_path, encoding="utf-8", errors="surrogatepass").read().splitlines()
     except Exception:
-        return ""
+        return "", []
 
     uuid_map = {}
     error_parent_uuids = []
+    categories = []
 
     for l in lines:
         if not l.strip():
@@ -125,13 +136,16 @@ def extract_trigger_text(transcript_path):
             uuid_map[o["uuid"]] = o
         if _is_refusal(o) and o.get("parentUuid"):
             error_parent_uuids.append(o["parentUuid"])
+            c = _refusal_category(o)
+            if c and c not in categories:
+                categories.append(c)
 
     texts = []
     for puuid in error_parent_uuids:
         parent = uuid_map.get(puuid)
         if parent:
             texts.append(_text(parent))
-    return "\n".join(texts)
+    return "\n".join(texts), categories
 
 
 def extract_vocab_clusters(text):
@@ -202,7 +216,7 @@ def main():
     if not transcript_path or not os.path.exists(transcript_path):
         sys.exit(0)
 
-    trigger_text = extract_trigger_text(transcript_path)
+    trigger_text, refusal_categories = extract_trigger_text(transcript_path)
     if not trigger_text:
         sys.exit(0)
 
@@ -241,6 +255,7 @@ def main():
         "cross_project_classes": cross_project_classes,
         "project_only_classes": project_only_classes,
         "classification": classification,
+        "refusal_categories": refusal_categories,
         "scrub_command": f"python3 {SCRUB_SCRIPT} --fix-active --apply",
         "trigger_text_snippet": trigger_text[:500],
     }

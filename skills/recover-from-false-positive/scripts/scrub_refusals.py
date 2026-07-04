@@ -70,16 +70,41 @@ def _sig(t):
     return any(s.lower() in low for s in _ALL_MARKERS)
 
 
-def _stop_reason(obj):
+def _msg(obj):
     m = obj.get("message") if isinstance(obj, dict) else None
-    return m.get("stop_reason") if isinstance(m, dict) else None
+    return m if isinstance(m, dict) else {}
+
+
+def _stop_reason(obj):
+    return _msg(obj).get("stop_reason")
+
+
+def _stop_details(obj):
+    sd = _msg(obj).get("stop_details")
+    return sd if isinstance(sd, dict) else {}
+
+
+def refusal_category(obj):
+    """The server-named classifier category (e.g. 'cyber', 'weapons'). Free-form — the
+    client is category-agnostic, so we CAPTURE it rather than hardcode a list. This is
+    how we 'handle every category': read whatever the server sent."""
+    return _stop_details(obj).get("category")
+
+
+def refusal_explanation(obj):
+    return _stop_details(obj).get("explanation") or ""
 
 
 def is_structural_refusal(obj):
-    """Reword-proof: an assistant API-error turn the client marked stop_reason=refusal."""
-    return (isinstance(obj, dict) and obj.get("isApiErrorMessage")
-            and obj.get("type") in (None, "assistant")
-            and _stop_reason(obj) == STRUCTURAL_STOP_REASON)
+    """Reword-proof + all-edges: an assistant API-error turn the client marked as a
+    refusal, via EITHER message.stop_reason=='refusal' OR stop_details.type=='refusal'
+    (both are set by the client from the server response, independent of wording or
+    category). Catches cyber, weapons, and any future category on day zero."""
+    if not (isinstance(obj, dict) and obj.get("isApiErrorMessage")
+            and obj.get("type") in (None, "assistant")):
+        return False
+    return (_stop_reason(obj) == STRUCTURAL_STOP_REASON
+            or _stop_details(obj).get("type") == STRUCTURAL_STOP_REASON)
 
 
 def is_signature_refusal(obj):
@@ -100,13 +125,14 @@ def is_novel_wording(obj):
 
 
 def observe_novel_wording(obj, path=""):
-    """Append an unseen refusal wording to OBSERVED_LOG (best-effort, delimiter-safe)."""
+    """Append an unseen refusal wording (+ its server category) to OBSERVED_LOG."""
     try:
-        snippet = " ".join(_text(obj).split())[:300]
+        snippet = " ".join((_text(obj) or refusal_explanation(obj)).split())[:300]
         if not snippet:
             return
+        cat = refusal_category(obj) or "?"
         with open(OBSERVED_LOG, "a", encoding="utf-8") as fh:
-            fh.write(f"{os.path.basename(path)}\t{snippet}\n")
+            fh.write(f"{os.path.basename(path)}\tcategory={cat}\t{snippet}\n")
     except Exception:
         pass
 
@@ -697,6 +723,8 @@ def selfcheck(root):
     and flags any isApiErrorMessage turn we can't account for."""
     total_err = struct = sigmatch = novel = other = 0
     novels = []
+    from collections import Counter
+    categories = Counter()
     for path in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True):
         try:
             data = open(path, encoding="utf-8", errors="ignore")
@@ -719,6 +747,7 @@ def selfcheck(root):
             else:
                 other += 1
                 continue
+            categories[refusal_category(o) or "(none)"] += 1
             if is_novel_wording(o):
                 novel += 1
                 snip = " ".join(_text(o).split())[:80]
@@ -726,13 +755,18 @@ def selfcheck(root):
                     novels.append(snip)
 
     print("── recover-from-false-positive self-check ──")
-    print(f"detection contract: isApiErrorMessage:true AND (message.stop_reason=='refusal'  [structural, reword-proof]")
-    print(f"                    OR known SIGNATURES text [{len(SIGNATURES)} known])")
+    print("detection contract: isApiErrorMessage:true AND (")
+    print("   message.stop_reason=='refusal' OR stop_details.type=='refusal'  [structural, reword+category-proof]")
+    print(f"   OR known SIGNATURES text [{len(SIGNATURES)} known])  — category read from stop_details.category")
     print(f"isApiErrorMessage turns scanned : {total_err}")
     print(f"  classified as refusal (structural) : {struct}")
     print(f"  classified as refusal (signature)  : {sigmatch}")
     print(f"  NEW wording caught structurally    : {novel}")
     print(f"  other API errors (500/overload/etc): {other}  (correctly left alone)")
+    if categories:
+        print("  refusal categories seen (from stop_details.category):")
+        for cat, n in categories.most_common():
+            print(f"    {cat}: {n}")
     if novel:
         print(f"⚠ {novel} refusal(s) matched STRUCTURALLY but not any known string — a new wording.")
         print(f"  Logged to {OBSERVED_LOG}. Consider adding to SIGNATURES:")

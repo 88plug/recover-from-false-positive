@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026.7.18
+
+Handle EVERY refusal category + edge, sourced from the actual client.
+
+From the installed binary + platform docs: a classifier refusal is an HTTP 200 with
+`stop_reason:"refusal"` and `stop_details:{type:"refusal", category:"<cyber|weapons|…>",
+explanation:"…"}`. The stored turn preserves all of it (verified: a real trip stored
+`category:"cyber"` + the full explanation). The client is CATEGORY-AGNOSTIC — it reads
+whatever the server sends (function `R8e` reads `stop_details.category`/`.explanation`),
+so we must capture, not hardcode.
+
+- **All-edges detection**: a refusal is now caught via `message.stop_reason=='refusal'`
+  OR `stop_details.type=='refusal'` (plus the legacy text path). Category-agnostic and
+  reword-proof → fires on cyber, weapons, or any future category on day zero.
+- **Category captured, not guessed**: `stop_details.category` + `.explanation` are read
+  and surfaced — `--selfcheck` tallies categories machine-wide; the detect hook records
+  `refusal_categories` in state; novel wordings are logged with their category.
+- Detection no longer depends on the human wording OR the category at all — both are
+  read for labeling, never required for matching.
+- Tests: smoke.sh step 11 (a `weapons` refusal delivered only via `stop_details.type`,
+  no `stop_reason`/known text, is caught and its category read; a plain error is left
+  alone).
+
 ## 2026.7.17
 
 **Clear-then-reinject: recover a stuck session in place — no close, no model switch.**

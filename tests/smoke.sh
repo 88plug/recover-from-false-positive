@@ -205,4 +205,27 @@ PY
 echo '{"cwd":"/home/x/demo"}' | HOME="$H" CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/inject-recovery-context.sh" | grep -q "continuity recap" && { echo "   NOT one-shot (recap re-injected)"; exit 1; } || echo "   one-shot consume verified"
 rm -rf "$H"
 
+echo "11. all-edges — a NEW category via stop_details.type (no stop_reason, no known text) is caught + category read"
+python3 - "$ROOT" <<'PY'
+import importlib.util, os, sys
+root=sys.argv[1]
+spec=importlib.util.spec_from_file_location("scrub", os.path.join(root,"skills/recover-from-false-positive/scripts/scrub_refusals.py"))
+s=importlib.util.module_from_spec(spec); spec.loader.exec_module(s)
+fails=[]
+# a future category, delivered ONLY via stop_details.type (not stop_reason, not known text)
+o={"uuid":"R","parentUuid":"U","type":"assistant","isApiErrorMessage":True,
+   "message":{"role":"assistant","model":"<synthetic>",
+              "stop_details":{"type":"refusal","category":"weapons","explanation":"…"},
+              "content":[{"type":"text","text":"API Error: some 2028 phrasing."}]}}
+if not s.is_refusal(o): fails.append("stop_details.type refusal MISSED")
+if s.refusal_category(o)!="weapons": fails.append(f"category not read (got {s.refusal_category(o)})")
+# and a plain end_turn error must still be left alone even with stop_details present
+benign={"uuid":"E","type":"assistant","isApiErrorMessage":True,
+        "message":{"role":"assistant","stop_reason":"end_turn","stop_details":None,
+                   "content":[{"type":"text","text":"API Error: 500"}]}}
+if s.is_refusal(benign): fails.append("benign error wrongly flagged")
+if fails: print("   REGRESSION:"); [print("     -",x) for x in fails]; sys.exit(1)
+print("   new category caught via stop_details.type, category read, benign left alone")
+PY
+
 echo "smoke OK"
