@@ -93,6 +93,25 @@ a LIST of these plus a loose fallback, gated on `isApiErrorMessage:true` + an
 report "clean" against the new wording — `tests/smoke.sh` now pins every known
 signature so that can't regress.
 
+**The response schema (source of truth — read this, don't guess).** A refusal is an
+HTTP 200 with, on the stored turn:
+
+```json
+{ "isApiErrorMessage": true, "type": "assistant",
+  "message": { "model": "<synthetic>", "stop_reason": "refusal",
+    "stop_details": { "type": "refusal", "category": "cyber",
+                      "explanation": "This request triggered cyber-related safeguards…" } } }
+```
+
+- **Primary detection is STRUCTURAL**: `stop_reason=="refusal"` OR
+  `stop_details.type=="refusal"` — set by the client regardless of wording OR category,
+  so it catches `cyber`, `weapons`, and any future category on day zero.
+- **`stop_details.category`** names what fired; **`explanation`** carries the human text.
+  The client is category-agnostic (it just reads these), so the plugin CAPTURES them
+  (`--selfcheck` tallies categories) rather than hardcoding a list.
+- `input_tokens:0` — the refusal turn is synthesized client-side, never a real
+  generation, and is filtered before the next API send.
+
 Two consequences, two halves of this skill:
 
 1. **The error gets written into the .jsonl session log** as an assistant turn
