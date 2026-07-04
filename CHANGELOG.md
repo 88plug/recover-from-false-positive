@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026.7.19
+
+**Surgical de-saturation is now the DEFAULT — word-for-word matters.**
+
+De-saturation no longer neutralizes tokens in place (the old `[detail]` stubbing
+mangled kept turns). It now DROPS the whole offending turns and keeps every other turn
+**byte-exact**:
+
+- `surgical_lines`: removes the vocabulary-dense turns in the resume window entirely,
+  re-stitches the chain (parentUuid rewired up, like refusal removal), and leaves all
+  other lines byte-for-byte identical.
+- **tool_use/tool_result pairs are dropped as a UNIT** (closed over `tool_use_id`), so
+  resume can never orphan a tool call. A drop group that would reach a protected recent
+  turn or span the compaction boundary is skipped (kept intact) instead of risking
+  breakage. Refuses to write if dangling pointers would increase.
+- Default everywhere (`--fix-active` when saturated, `--desaturate`). `--stub` opts back
+  into the old in-place neutralization when a caller needs the transcript length kept.
+- Verified on a real 72MB session: dropped 52 offending turns (~328KB), `delta=+0`,
+  every kept turn byte-exact; 4 turns kept because dropping them would orphan a tool
+  pair.
+- Test: smoke.sh step 12 (offending dropped, kept turns byte-identical, tool pair
+  dropped as a unit, chain re-stitched, no orphaned tool blocks).
+
 ## 2026.7.18
 
 Handle EVERY refusal category + edge, sourced from the actual client.
