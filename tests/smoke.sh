@@ -228,4 +228,43 @@ if fails: print("   REGRESSION:"); [print("     -",x) for x in fails]; sys.exit(
 print("   new category caught via stop_details.type, category read, benign left alone")
 PY
 
+echo "12. surgical (default) — offending turns DROPPED, kept turns BYTE-EXACT, tool pairs intact"
+python3 - "$ROOT" <<'PY'
+import importlib.util, json, os, sys
+root=sys.argv[1]
+spec=importlib.util.spec_from_file_location("scrub", os.path.join(root,"skills/recover-from-false-positive/scripts/scrub_refusals.py"))
+s=importlib.util.module_from_spec(spec); spec.loader.exec_module(s)
+dense=("codegen cmd/compile share-generics instantiation toolchain redundant compilation ")*6
+def turn(u,p,typ,role,content,**k): return json.dumps({"uuid":u,"parentUuid":p,"type":typ,"message":{"role":role,"content":content},**k})
+raw=[
+  json.dumps({"uuid":"S","parentUuid":None,"type":"system","subtype":"microcompact_boundary","content":"b"}),
+  turn("KEEP1","S","user","user","a perfectly ordinary sentence kept verbatim"),   # low density → keep byte-exact
+  turn("A","KEEP1","assistant","assistant",[{"type":"tool_use","id":"tu1","name":"Read","input":{"file":"x"}}]),
+  turn("B","A","user","user",[{"type":"tool_result","tool_use_id":"tu1","content":dense}]),  # dense result → drop, with its use
+  turn("C","B","assistant","assistant",[{"type":"text","text":dense}]),            # dense text → drop
+  turn("KEEP2","C","user","user","the most recent question, protected"),
+]
+out,dropped,freed,manifest=s.surgical_lines(raw, keep_recent=1, min_score=4)
+objs=[json.loads(l) for l in out]; by={o["uuid"]:o for o in objs}
+fails=[]
+if "C" in by: fails.append("dense text turn C not dropped")
+if "B" in by: fails.append("dense tool_result turn B not dropped")
+if "A" in by: fails.append("tool_use turn A not dropped with its result (orphan risk)")
+if by.get("KEEP1",{}).get("message",{}).get("content")!="a perfectly ordinary sentence kept verbatim":
+    fails.append("kept turn KEEP1 not byte-exact")
+# KEEP1's original raw line must be byte-identical in output (word-for-word)
+if raw[1] not in out: fails.append("KEEP1 line not preserved byte-for-byte")
+if by.get("KEEP2",{}).get("message",{}).get("content")!="the most recent question, protected":
+    fails.append("protected recent turn altered")
+# chain: KEEP2 should re-stitch up past dropped C/B/A to KEEP1
+if by.get("KEEP2",{}).get("parentUuid")!="KEEP1": fails.append(f"chain not re-stitched (KEEP2 parent={by.get('KEEP2',{}).get('parentUuid')})")
+if s.dangling_count(out)-s.dangling_count(raw)>0: fails.append("dangling increased")
+# no orphaned tool blocks in output
+uses={b.get("id") for o in objs for b in (o.get("message",{}).get("content") or []) if isinstance(b,dict) and b.get("type")=="tool_use"}
+ress={b.get("tool_use_id") for o in objs for b in (o.get("message",{}).get("content") or []) if isinstance(b,dict) and b.get("type")=="tool_result"}
+if uses^ress: fails.append(f"orphaned tool blocks: uses={uses} results={ress}")
+if fails: print("   REGRESSION:"); [print("     -",x) for x in fails]; sys.exit(1)
+print(f"   dropped {dropped} offending turns, kept byte-exact, tool pair dropped as unit, chain re-stitched")
+PY
+
 echo "smoke OK"

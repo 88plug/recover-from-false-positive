@@ -557,19 +557,136 @@ def desaturate_lines(raw, keep_recent=6, min_score=4, terms=None):
     return out, stubbed, saved, manifest
 
 
-def desaturate_and_write(path, apply=False, keep_recent=6, min_score=4, backup_tag="desat"):
+def _blocks(o):
+    c = _msg(o).get("content")
+    return c if isinstance(c, list) else []
+
+
+def _use_ids(o):
+    return [b.get("id") for b in _blocks(o)
+            if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id")]
+
+
+def _result_ids(o):
+    return [b.get("tool_use_id") for b in _blocks(o)
+            if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id")]
+
+
+def surgical_lines(raw, keep_recent=6, min_score=4, terms=None):
+    """SURGICAL (default): DROP the whole offending turns and keep every other turn
+    BYTE-EXACT — no token neutralization, no stub placeholders. A dropped turn is
+    removed entirely and the chain is re-stitched (parentUuid rewired up), exactly like
+    refusal removal. tool_use/tool_result pairs are dropped as a UNIT so resume can't
+    orphan a tool call; a drop group that would reach a protected recent turn or escape
+    the resume window is skipped (kept intact) rather than risk breakage.
+    Returns (out_lines, dropped, bytes_freed, manifest)."""
+    terms = tuple(terms) if terms else (_DESAT_TERMS + _extra_terms())
+    objs = []
+    for l in raw:
+        s = l.strip()
+        if not s:
+            objs.append(None); continue
+        try:
+            objs.append(json.loads(l))
+        except Exception:
+            objs.append(None)
+    real = [(i, o) for i, o in enumerate(objs) if isinstance(o, dict)]
+    start = _window_start([o for _, o in real])
+    win = real[start:]
+    win_idx = {i for i, _ in win}
+    protect = {i for i, _ in win[-keep_recent:]}
+
+    id2use, id2res = {}, {}
+    for i, o in real:
+        for u in _use_ids(o):
+            id2use[u] = i
+        for r in _result_ids(o):
+            id2res[r] = i
+
+    seeds = []
+    for i, o in win:
+        if i in protect or o.get("type") not in ("user", "assistant"):
+            continue
+        if is_refusal(o) or o.get("isMeta"):
+            continue
+        if _turn_score(o, terms) >= min_score:
+            seeds.append(i)
+
+    drop = set()
+    for seed in seeds:
+        group, stack = set(), [seed]
+        while stack:                                   # close over tool_use/tool_result pairs
+            i = stack.pop()
+            if i in group:
+                continue
+            group.add(i)
+            o = objs[i]
+            for u in _use_ids(o):
+                j = id2res.get(u)
+                if j is not None:
+                    stack.append(j)
+            for r in _result_ids(o):
+                j = id2use.get(r)
+                if j is not None:
+                    stack.append(j)
+        if (group & protect) or not (group <= win_idx):  # unsafe → keep intact
+            continue
+        drop |= group
+
+    remove_parent = {objs[i].get("uuid"): objs[i].get("parentUuid")
+                     for i in drop if objs[i].get("uuid")}
+
+    def resolve(p, seen=None):
+        seen = seen or set()
+        while p in remove_parent and p not in seen:
+            seen.add(p); p = remove_parent[p]
+        return p
+
+    out, dropped, freed, manifest = [], 0, 0, []
+    for i, l in enumerate(raw):
+        o = objs[i] if i < len(objs) else None
+        if isinstance(o, dict) and i in drop:
+            dropped += 1
+            freed += len(l)
+            manifest.append((i, _turn_score(o, terms), _msg(o).get("role") or o.get("type"),
+                             " ".join(_dense_text(o).split())[:60]))
+            continue
+        if isinstance(o, dict) and o.get("parentUuid") in remove_parent:
+            o = dict(o)
+            o["parentUuid"] = resolve(o["parentUuid"])
+            out.append(json.dumps(o, ensure_ascii=False))
+        else:
+            out.append(l)                              # BYTE-EXACT — word-for-word kept
+    return out, dropped, freed, manifest
+
+
+def desaturate_and_write(path, apply=False, keep_recent=6, min_score=4,
+                         backup_tag="desat", stub=False):
+    """Default = SURGICAL: drop whole offending turns, keep the rest word-for-word.
+    stub=True falls back to the older in-place neutralization (kept for callers that
+    need the transcript to stay the same length)."""
     raw = open(path, encoding="utf-8", errors="surrogatepass").read().splitlines()
-    out, stubbed, saved, manifest = desaturate_lines(raw, keep_recent, min_score)
-    if not stubbed:
-        print(f"  de-saturate: nothing dense enough to trim in {os.path.basename(path)}")
+    if stub:
+        out, n, saved, manifest = desaturate_lines(raw, keep_recent, min_score)
+        verb, unit = "neutralized", saved
+    else:
+        out, n, saved, manifest = surgical_lines(raw, keep_recent, min_score)
+        verb, unit = "dropped", saved
+    if not n:
+        print(f"  de-saturate: nothing dense enough to touch in {os.path.basename(path)}")
         return 0
-    print(f"  de-saturate: {stubbed} dense turn(s), ~{saved//1024}KB freed in {os.path.basename(path)}")
-    for n, sc, role, prev in manifest[:8]:
-        print(f"    line {n} score={sc} {role}: {prev!r}")
+    delta = dangling_count(out) - dangling_count(raw)
+    print(f"  de-saturate ({'stub' if stub else 'surgical'}): {verb} {n} offending turn(s), "
+          f"~{unit//1024}KB, delta={delta:+d}, rest byte-exact — {os.path.basename(path)}")
+    for ln, sc, role, prev in manifest[:8]:
+        print(f"    line {ln} score={sc} {role}: {prev!r}")
     if len(manifest) > 8:
         print(f"    … +{len(manifest)-8} more")
+    if delta > 0:
+        print("  ! would increase dangling pointers — refusing to write this file.")
+        return 0
     if not apply:
-        return stubbed
+        return n
     stamp = int(time.time())
     backup = os.path.expanduser(f"~/.claude/{backup_tag}-{stamp}.tar.gz")
     with tarfile.open(backup, "w:gz") as tar:
@@ -579,7 +696,7 @@ def desaturate_and_write(path, apply=False, keep_recent=6, min_score=4, backup_t
     with open(tmp, "w", encoding="utf-8") as fh:
         fh.write("\n".join(out) + "\n")
     os.replace(tmp, path)
-    return stubbed
+    return n
 
 
 def refusal_count(path):
@@ -802,6 +919,10 @@ def main():
                          "(stub vocabulary-dense turns in the resume window; reversible)")
     ap.add_argument("--no-desaturate", action="store_true",
                     help="disable the default de-saturation inside --fix-active")
+    ap.add_argument("--stub", action="store_true",
+                    help="de-saturate by neutralizing content in place (keeps transcript "
+                         "length) instead of the default SURGICAL drop (removes whole "
+                         "offending turns, keeps every other turn byte-exact)")
     ap.add_argument("--file", default=None,
                     help="explicit session .jsonl to target (for --desaturate on a session "
                          "whose refusal turns were already scrubbed but is still saturated)")
@@ -852,12 +973,12 @@ def main():
             newest = max(targets, key=lambda p: os.path.getmtime(p))
         print(f"De-saturate: {newest}")
         desaturate_and_write(newest, apply=args.apply,
-                             keep_recent=args.keep_recent, min_score=args.desat_min_score)
+                             keep_recent=args.keep_recent, min_score=args.desat_min_score, stub=args.stub)
         # subagent shards share the trip's vocabulary — de-saturate them too
         shard_dir = os.path.splitext(newest)[0]
         for s in glob.glob(os.path.join(shard_dir, "**", "*.jsonl"), recursive=True):
             desaturate_and_write(s, apply=args.apply, keep_recent=args.keep_recent,
-                                 min_score=args.desat_min_score, backup_tag="desat-shard")
+                                 min_score=args.desat_min_score, backup_tag="desat-shard", stub=args.stub)
         if not args.apply:
             print("\nDry run. Re-run with --desaturate --apply to write.")
         return
@@ -888,7 +1009,7 @@ def main():
             print("  session is saturated (repeated trips) → de-saturating live window "
                   "so resume won't re-fire (use --no-desaturate to skip):")
             desaturate_and_write(newest, apply=args.apply,
-                                 keep_recent=args.keep_recent, min_score=args.desat_min_score)
+                                 keep_recent=args.keep_recent, min_score=args.desat_min_score, stub=args.stub)
         # A trip also poisons this session's SUBAGENT shards, which live under
         # <session-stem>/subagents/**/*.jsonl — fix_active only touches the main
         # file, so scrub the shards too (chain-safe, self-verifying per file).
@@ -920,7 +1041,7 @@ def main():
         if do_desat:
             for s in glob.glob(os.path.join(shard_dir, "**", "*.jsonl"), recursive=True):
                 desaturate_and_write(s, apply=args.apply, keep_recent=args.keep_recent,
-                                     min_score=args.desat_min_score, backup_tag="desat-shard")
+                                     min_score=args.desat_min_score, backup_tag="desat-shard", stub=args.stub)
         if not args.apply:
             print("\nDry run. Re-run with --fix-active --apply to write.")
         return

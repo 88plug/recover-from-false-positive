@@ -24,15 +24,19 @@ is family-wide) and not `/compact` (a generation over the poison → also trips)
    # or target a session whose refusals were already scrubbed but still trips:
    python3 …/scrub_refusals.py --desaturate --file <session.jsonl> --apply
    ```
+   De-saturation is **surgical by default**: it DROPS the offending vocabulary-dense
+   turns in the resume window and keeps every other turn **byte-exact** (word-for-word),
+   re-stitching the chain and dropping tool_use/tool_result pairs as a unit so resume
+   can't orphan a tool call. `--stub` keeps transcript length by neutralizing in place
+   instead.
 3. **In place — no close, no model switch (preferred): CLEAR THEN REINJECT.**
    `/clear` is local (empties the in-memory context, never generates → cannot trip).
    The trick is to carry the state across it. From a CLEAN sibling terminal:
    ```bash
    python3 …/scrub_refusals.py --handoff --file <session.jsonl> --apply
    ```
-   That builds a DE-SATURATED recap offline (no generation) from the session's own
-   last compaction summary — decisions/next-steps kept, trigger vocabulary stripped to
-   density 0 — and stages it. Then in the STUCK session: run `/clear`, type `continue`.
+   That builds a recap offline (no generation) from the session's own last compaction
+   summary and stages it. Then in the STUCK session: run `/clear`, type `continue`.
    The `UserPromptSubmit` hook re-injects the recap once (via `additionalContext`) and
    the user keeps going, same session, full continuity, no model change.
 4. To instead RESUME from disk (also keeps history): in the stuck terminal `/quit`,
