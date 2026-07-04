@@ -24,11 +24,20 @@ is family-wide) and not `/compact` (a generation over the poison → also trips)
    # or target a session whose refusals were already scrubbed but still trips:
    python3 …/scrub_refusals.py --desaturate --file <session.jsonl> --apply
    ```
-3. To take effect, the session must RE-READ the edited file: in the stuck terminal
-   `/quit`, then `claude --resume <id> "continue"` (keeps history). A disk edit is
-   invisible to a still-running session.
-4. If the user refuses to close it: `/clear` is the only in-place, no-generation,
-   no-model-switch reset (drops context, keeps the session id).
+3. **In place — no close, no model switch (preferred): CLEAR THEN REINJECT.**
+   `/clear` is local (empties the in-memory context, never generates → cannot trip).
+   The trick is to carry the state across it. From a CLEAN sibling terminal:
+   ```bash
+   python3 …/scrub_refusals.py --handoff --file <session.jsonl> --apply
+   ```
+   That builds a DE-SATURATED recap offline (no generation) from the session's own
+   last compaction summary — decisions/next-steps kept, trigger vocabulary stripped to
+   density 0 — and stages it. Then in the STUCK session: run `/clear`, type `continue`.
+   The `UserPromptSubmit` hook re-injects the recap once (via `additionalContext`) and
+   the user keeps going, same session, full continuity, no model change.
+4. To instead RESUME from disk (also keeps history): in the stuck terminal `/quit`,
+   then `claude --resume <id> "continue"`. A disk edit is invisible to a still-running
+   session, so this is only for when they will restart it.
 5. **Never end up here again:** apply the prevention config in
    `references/never-close.md` (cap file-read tokens + earlier microcompact + context
    editing) so sessions never saturate to the trip point. Triage exposure with

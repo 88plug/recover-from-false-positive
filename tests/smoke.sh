@@ -175,4 +175,34 @@ PY
 python3 "$ROOT/skills/recover-from-false-positive/scripts/scrub_refusals.py" --backtest --root /tmp/rfp-backtest-$$ | grep -q "at-risk" && echo "   backtest reported" || { echo "   backtest FAILED"; exit 1; }
 rm -rf /tmp/rfp-backtest-$$
 
+echo "10. clear-then-reinject — offline recap staged, hook injects it once (low density), consumes it"
+H=/tmp/rfp-handoff-$$; mkdir -p "$H/.claude" "$H/proj"
+python3 - "$H/proj/s.jsonl" <<'PY'
+import json,sys
+dense="codegen cmd/compile share-generics instantiation toolchain redundant compilation "*8
+rows=[
+ {"uuid":"S","parentUuid":None,"type":"system","subtype":"microcompact_boundary","content":"b","cwd":"/home/x/demo"},
+ {"uuid":"A","parentUuid":"S","type":"user","isCompactSummary":True,"cwd":"/home/x/demo",
+  "message":{"role":"user","content":"Continued from previous conversation. Decision: approach X for "+dense+". Next: wire the Y lane."}},
+]
+open(sys.argv[1],"w").write("\n".join(json.dumps(r) for r in rows)+"\n")
+PY
+HOME="$H" python3 "$ROOT/skills/recover-from-false-positive/scripts/scrub_refusals.py" --handoff --file "$H/proj/s.jsonl" --apply >/dev/null 2>&1
+ls "$H"/.claude/.fp-reinject-*.md >/dev/null 2>&1 || { echo "   handoff did not stage recap"; exit 1; }
+OUT=$(echo '{"cwd":"/home/x/demo"}' | HOME="$H" CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/inject-recovery-context.sh")
+python3 - "$OUT" <<'PY'
+import json,sys
+ctx=json.loads(sys.argv[1])["hookSpecificOutput"]["additionalContext"]
+fails=[]
+if "continuity recap" not in ctx: fails.append("recap not injected")
+if "wire the Y lane" not in ctx: fails.append("decision/next-step not preserved")
+dens=sum(ctx.lower().count(t) for t in ("codegen","cmd/compile","share-generics","instantiation","toolchain"))
+if dens>0: fails.append(f"recap still dense ({dens} trigger words) — would trip")
+if fails: print("   REGRESSION:"); [print("     -",x) for x in fails]; sys.exit(1)
+print("   recap injected, decisions preserved, density=0 (safe to reinject)")
+PY
+# one-shot: second fire has no recap
+echo '{"cwd":"/home/x/demo"}' | HOME="$H" CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/inject-recovery-context.sh" | grep -q "continuity recap" && { echo "   NOT one-shot (recap re-injected)"; exit 1; } || echo "   one-shot consume verified"
+rm -rf "$H"
+
 echo "smoke OK"

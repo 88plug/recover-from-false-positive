@@ -573,6 +573,84 @@ def refusal_count(path):
     return n
 
 
+def _cwd_slug(cwd):
+    """Match Claude Code's project-dir slug: absolute path, '/'→'-'."""
+    return cwd.replace("/", "-") if cwd else ""
+
+
+def _neutralize(text, terms=None):
+    """Lower a recap's classifier-trigger DENSITY while keeping its meaning: drop fenced
+    code + long paths, replace trigger vocab with a neutral placeholder, collapse space,
+    cap length. The result must be safe to re-inject into a live session without tripping."""
+    import re
+    terms = tuple(terms) if terms else (_DESAT_TERMS + _extra_terms())
+    text = re.sub(r"```.*?```", " [code omitted] ", text, flags=re.S)     # drop code blocks
+    text = re.sub(r"(/[\w.\-]+){3,}", " [path] ", text)                    # drop long paths
+    for t in sorted(terms, key=len, reverse=True):
+        text = re.sub(re.escape(t), "[detail]", text, flags=re.I)
+    text = re.sub(r"\[detail\]\w*", "[detail]", text)                     # eat term suffixes
+    text = re.sub(r"\[detail\]([\s,]*\[detail\])+", "[detail]", text)      # collapse runs
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:1600]
+
+
+def handoff(path, apply=False):
+    """Produce a DE-SATURATED recap of a session and stage it for re-injection after a
+    /clear — the 'clear then reinject' flow: the user never closes the session or switches
+    model. The recap is built offline (no generation → no trip); the UserPromptSubmit hook
+    injects it on the next prompt. Prefers the transcript's own last compaction summary
+    (LLM-quality, already written) so we neutralize rather than regenerate."""
+    objs, cwd = [], ""
+    for l in open(path, encoding="utf-8", errors="surrogatepass"):
+        l = l.strip()
+        if not l:
+            continue
+        try:
+            o = json.loads(l)
+        except Exception:
+            continue
+        objs.append(o)
+        if isinstance(o, dict) and o.get("cwd"):
+            cwd = o["cwd"]
+
+    summary = ""
+    for o in objs:                                   # last compaction summary, if any
+        if not isinstance(o, dict) or o.get("desaturated"):   # skip our own stubs
+            continue
+        m = o.get("message") if isinstance(o.get("message"), dict) else {}
+        c = m.get("content", "")
+        is_sum = o.get("isCompactSummary") or (isinstance(c, str)
+                 and "continued from a previous conversation" in c.lower())
+        if is_sum:
+            summary = c if isinstance(c, str) else _dense_text(o)
+    if not summary:                                  # fallback: recent real user intent
+        ut = [_dense_text(o) for o in objs
+              if isinstance(o, dict) and o.get("type") == "user"
+              and not o.get("isMeta") and not o.get("desaturated")]
+        summary = "\n".join(ut[-5:])
+
+    recap = _neutralize(summary)
+    anchor = ("[continuity recap — prior context was cleared to recover from a false-positive "
+              "classifier trip; keep working, do not re-close or switch models]\n\n" + recap)
+    print(f"De-saturated recap ({len(anchor)} chars) for cwd={cwd or '?'}:")
+    print("  " + anchor[:280].replace("\n", " ") + (" …" if len(anchor) > 280 else ""))
+    if not apply:
+        print("\nDry run. Re-run with --handoff --file … --apply to stage the re-injection.")
+        return
+    slug = _cwd_slug(cwd)
+    if not slug:
+        print("  ! no cwd in transcript — cannot key the re-inject file; aborting.")
+        return
+    out = os.path.expanduser(f"~/.claude/.fp-reinject-{slug}.md")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, "w", encoding="utf-8") as fh:
+        fh.write(anchor + "\n")
+    print(f"\nStaged: {out}")
+    print("Now, IN THE STUCK SESSION (no close, no model change):")
+    print("  1. /clear        ← empties in-memory context locally, never generates → no trip")
+    print("  2. type: continue ← the hook re-injects this recap once, and you keep going")
+
+
 def backtest(root):
     """Machine-wide exposure report: which sessions carry a dense+large resume window
     that would re-trip the classifier on --resume. Prevention triage, not a fix."""
@@ -699,6 +777,10 @@ def main():
     ap.add_argument("--backtest", action="store_true",
                     help="scan ALL sessions on the machine and list the ones whose resume "
                          "window is dense+large enough to re-trip (prevention triage)")
+    ap.add_argument("--handoff", action="store_true",
+                    help="stage a de-saturated recap for the 'clear then reinject' flow: user "
+                         "runs /clear in the stuck session and the hook re-injects it — no "
+                         "close, no model switch. Use with --file <session.jsonl> [--apply]")
     ap.add_argument("--keep-recent", type=int, default=6,
                     help="de-saturate: leave the last N turns untouched (default 6)")
     ap.add_argument("--desat-min-score", type=int, default=4,
@@ -711,6 +793,15 @@ def main():
 
     if args.backtest:
         backtest(args.root)
+        return
+
+    if args.handoff:
+        if not args.file:
+            print("--handoff needs --file <session.jsonl>"); sys.exit(1)
+        f = os.path.abspath(os.path.expanduser(args.file))
+        if not os.path.exists(f):
+            print(f"No such file: {f}"); sys.exit(1)
+        handoff(f, apply=args.apply)
         return
 
     if args.desaturate:

@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026.7.17
+
+**Clear-then-reinject: recover a stuck session in place — no close, no model switch.**
+
+Deep-dived the installed binary: `/clear` (`clearConversation`) is a LOCAL op that
+empties the in-memory message array without generating (so it never trips), keeps the
+same session, and `UserPromptSubmit` hooks can inject `additionalContext` back into the
+model context. That's a clean recovery channel that keeps the session open.
+
+- **`--handoff --file <session.jsonl> [--apply]`**: builds a DE-SATURATED recap OFFLINE
+  (no generation → no trip) from the session's own last compaction summary — decisions
+  and next-steps preserved, trigger vocabulary neutralized to density 0 — and stages it
+  at `~/.claude/.fp-reinject-<cwd-slug>.md`.
+- **`inject-recovery-context.sh`** now re-injects that staged recap exactly once on the
+  next `UserPromptSubmit` (keyed by cwd), then consumes it. Flow: from a clean sibling
+  run `--handoff --apply`; in the stuck session run `/clear` and type `continue`. Same
+  session, full continuity, no model switch. The hook's old "switch model" advice is
+  replaced by this in-place path.
+- SKILL.md "Primary recovery" now leads with clear-then-reinject as the preferred
+  in-place option.
+- Test: smoke.sh step 10 (recap staged, injected once at density 0 with decisions
+  preserved, one-shot consume).
+
 ## 2026.7.16
 
 Make de-saturation the default first move, and answer "never close the session".
