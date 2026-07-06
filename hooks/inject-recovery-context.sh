@@ -14,6 +14,7 @@ STATE="$HOME/.claude/.fp-state.json"
 PAYLOAD="$(cat 2>/dev/null)"
 CWD="$(printf '%s' "$PAYLOAD" | jq -r '.cwd // empty' 2>/dev/null)"
 [[ -z "$CWD" ]] && CWD="$PWD"
+SESSION_ID="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null)"
 SLUG="${CWD//\//-}"
 REINJECT="$HOME/.claude/.fp-reinject-${SLUG}.md"
 
@@ -41,6 +42,18 @@ fi
 
 # ── Job 1: no trip pending → prevention only ─────────────────────────────────
 if [[ ! -f "$STATE" ]]; then
+    emit "$PREVENTION"
+    exit 0
+fi
+
+# A state file from a DIFFERENT (already-ended) session is a stale orphan — it
+# never got consumed before that session closed. Firing recovery in an unrelated
+# session's first turn is a false trigger. Discard it and fall through to
+# prevention-only. (Conservative: only discard on a confirmed mismatch — an
+# older state file or payload missing session_id still gets the old behavior.)
+STATE_SESSION_ID=$(jq -r '.session_id // empty' "$STATE" 2>/dev/null)
+if [[ -n "$STATE_SESSION_ID" && -n "$SESSION_ID" && "$STATE_SESSION_ID" != "$SESSION_ID" ]]; then
+    rm -f "$STATE"
     emit "$PREVENTION"
     exit 0
 fi
