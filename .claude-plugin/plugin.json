@@ -31,6 +31,5 @@
     "usage-policy",
     "content-filter",
     "refusal-recovery"
-  ],
-  "hooks": "./hooks/hooks.json"
+  ]
 }
