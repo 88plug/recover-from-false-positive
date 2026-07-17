@@ -220,7 +220,9 @@ def extract_trigger_text(transcript_path):
         return "", []
 
     uuid_map = {}
+    ordered = []  # transcript order for parentUuid-less refusals
     error_parent_uuids = []
+    orphan_refusal_idxs = []
     categories = []
 
     for line in lines:
@@ -230,19 +232,40 @@ def extract_trigger_text(transcript_path):
             o = json.loads(line)
         except Exception:
             continue
+        ordered.append(o)
         if o.get("uuid"):
             uuid_map[o["uuid"]] = o
-        if _is_refusal(o) and o.get("parentUuid"):
-            error_parent_uuids.append(o["parentUuid"])
+        if _is_refusal(o):
             c = _refusal_category(o)
             if c and c not in categories:
                 categories.append(c)
+            puuid = o.get("parentUuid")
+            if puuid:
+                error_parent_uuids.append(puuid)
+            else:
+                orphan_refusal_idxs.append(len(ordered) - 1)
 
     texts = []
     for puuid in error_parent_uuids:
         parent = uuid_map.get(puuid)
         if parent:
             texts.append(_text(parent))
+
+    # Refusals without parentUuid used to yield empty trigger_text → silent exit.
+    # Fall back to nearest prior user (or non-refusal assistant) turn text.
+    for idx in orphan_refusal_idxs:
+        fallback = ""
+        for j in range(idx - 1, -1, -1):
+            prev = ordered[j]
+            if _is_refusal(prev):
+                continue
+            t = _text(prev)
+            if t.strip():
+                fallback = t
+                break
+        if fallback:
+            texts.append(fallback)
+
     return "\n".join(texts), categories
 
 

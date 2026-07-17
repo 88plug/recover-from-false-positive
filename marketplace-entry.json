@@ -1,11 +1,19 @@
 {
   "name": "recover-from-false-positive",
   "source": {
-    "source": "github",
-    "repo": "88plug/recover-from-false-positive"
+    "source": "url",
+    "url": "https://github.com/88plug/recover-from-false-positive.git"
   },
   "description": "Recover Claude Code sessions after an Anthropic API output-classifier false positive (the \"cyber-related safeguards\" / \"appears to violate our Usage Policy\" hard failure). JSON-aware .jsonl log surgeon: removes the triggering message + refusal turn, re-stitches the parentUuid chain so the session resumes cleanly, cleans accumulated refusals across old sessions, and installs a per-repo CLAUDE.md framing guard to stop recurrence.",
   "category": "productivity",
-  "tags": ["type:plugin", "classifier", "false-positive", "session-recovery", "jsonl", "log-repair", "usage-policy"],
+  "tags": [
+    "type:plugin",
+    "classifier",
+    "false-positive",
+    "session-recovery",
+    "jsonl",
+    "log-repair",
+    "usage-policy"
+  ],
   "homepage": "https://github.com/88plug/recover-from-false-positive"
 }
