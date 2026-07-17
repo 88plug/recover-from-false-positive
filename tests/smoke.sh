@@ -159,7 +159,11 @@ PY
 
 echo "8. self-check runs and reports (fail-loud durability audit)"
 mkdir -p /tmp/rfp-selfcheck-$$/proj && : > /tmp/rfp-selfcheck-$$/proj/empty.jsonl
-python3 "$ROOT/skills/recover-from-false-positive/scripts/scrub_refusals.py" --selfcheck --root /tmp/rfp-selfcheck-$$ | grep -q "detection contract" && echo "   self-check reported" || { echo "   self-check FAILED"; exit 1; }
+if python3 "$ROOT/skills/recover-from-false-positive/scripts/scrub_refusals.py" --selfcheck --root /tmp/rfp-selfcheck-$$ | grep -q "detection contract"; then
+  echo "   self-check reported"
+else
+  echo "   self-check FAILED"; exit 1
+fi
 rm -rf /tmp/rfp-selfcheck-$$
 
 echo "9. backtest runs over a tree and reports exposure"
@@ -172,7 +176,11 @@ for i in range(6):
     rows.append({"uuid":f"u{i}","parentUuid":"S","type":"user","message":{"role":"user","content":dense}})
 open(sys.argv[1],"w").write("\n".join(json.dumps(r) for r in rows)+"\n")
 PY
-python3 "$ROOT/skills/recover-from-false-positive/scripts/scrub_refusals.py" --backtest --root /tmp/rfp-backtest-$$ | grep -q "at-risk" && echo "   backtest reported" || { echo "   backtest FAILED"; exit 1; }
+if python3 "$ROOT/skills/recover-from-false-positive/scripts/scrub_refusals.py" --backtest --root /tmp/rfp-backtest-$$ | grep -q "at-risk"; then
+  echo "   backtest reported"
+else
+  echo "   backtest FAILED"; exit 1
+fi
 rm -rf /tmp/rfp-backtest-$$
 
 echo "10. clear-then-reinject — offline recap staged, hook injects it once (low density), consumes it"
@@ -273,7 +281,9 @@ echo "6. run-python launcher (thin PATH + no bare python3 in hooks)"
 test -f "$ROOT/scripts/run-python.sh"
 bash -n "$ROOT/scripts/run-python.sh"
 bash "$ROOT/scripts/run-python.sh" -c 'import sys; assert sys.version_info >= (3, 10)'
-! grep -qE '"command"[[:space:]]*:[[:space:]]*"python3' "$ROOT/hooks/hooks.json"
+if grep -qE '"command"[[:space:]]*:[[:space:]]*"python3' "$ROOT/hooks/hooks.json"; then
+  echo "   bare python3 in hooks.json"; exit 1
+fi
 if [ -x /usr/bin/python3 ]; then
   env -i HOME="$HOME" PATH="/usr/bin:/bin" bash "$ROOT/scripts/run-python.sh" -c 'import sys; print(sys.version_info[0])' | grep -q 3
 fi

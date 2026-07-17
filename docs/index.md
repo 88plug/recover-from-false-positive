@@ -125,4 +125,4 @@ in yourself, this plugin does not ship them by default:
 
 ## License
 
-[FSL-1.1-ALv2](LICENSE.md) — Functional Source License, converts to Apache-2.0.
+[FSL-1.1-ALv2](https://github.com/88plug/recover-from-false-positive/blob/main/LICENSE.md) — Functional Source License, converts to Apache-2.0.
