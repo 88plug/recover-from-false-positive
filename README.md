@@ -7,7 +7,7 @@
 **Recover a Claude Code session when Anthropic's API output classifier false-positives on legitimate engineering work — and stop it happening again.**
 
 [![plugin-validate](https://github.com/88plug/recover-from-false-positive/actions/workflows/plugin-validate.yml/badge.svg)](https://github.com/88plug/recover-from-false-positive/actions/workflows/plugin-validate.yml)
-[![License: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue?style=flat)](LICENSE.md)
+[![License: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue?style=flat)](LICENSE)
 [![Version](https://img.shields.io/badge/version-2026.6.3-green?style=flat)](.claude-plugin/plugin.json)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2?style=flat)](https://github.com/88plug/claude-code-plugins)
 [![Docs](https://img.shields.io/badge/docs-online-2ea44f?style=flat)](https://88plug.github.io/recover-from-false-positive/)
@@ -132,4 +132,4 @@ in yourself, this plugin does not ship them by default:
 
 ## License
 
-[FSL-1.1-ALv2](LICENSE.md) — Functional Source License, converts to Apache-2.0.
+[FSL-1.1-ALv2](LICENSE) — Functional Source License, converts to Apache-2.0.
