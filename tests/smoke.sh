@@ -268,3 +268,13 @@ print(f"   dropped {dropped} offending turns, kept byte-exact, tool pair dropped
 PY
 
 echo "smoke OK"
+
+echo "6. run-python launcher (thin PATH + no bare python3 in hooks)"
+test -f "$ROOT/scripts/run-python.sh"
+bash -n "$ROOT/scripts/run-python.sh"
+bash "$ROOT/scripts/run-python.sh" -c 'import sys; assert sys.version_info >= (3, 10)'
+! grep -qE '"command"[[:space:]]*:[[:space:]]*"python3' "$ROOT/hooks/hooks.json"
+if [ -x /usr/bin/python3 ]; then
+  env -i HOME="$HOME" PATH="/usr/bin:/bin" bash "$ROOT/scripts/run-python.sh" -c 'import sys; print(sys.version_info[0])' | grep -q 3
+fi
+echo "   run-python ok"

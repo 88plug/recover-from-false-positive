@@ -82,7 +82,7 @@ Step 1: Run the session repair command (removes the error turns AND de-saturates
   $SCRUB_CMD
 
 Step 2: Identify the project:
-  python3 \"$SCRUB\" --latest
+  bash \"${CLAUDE_PLUGIN_ROOT:-}/scripts/run-python.sh\" \"$SCRUB\" --latest
 
 Step 3: Use edgar-morin to classify the trigger:
   - call start_complex_reasoning
@@ -99,7 +99,7 @@ Step 4: Based on edgar-morin verdict — update CLAUDE.md files:
 
 Step 5: Update auto-memory with what was fixed.
 
-If a generation is blocked AGAIN before recovery completes, the fastest IN-PLACE unstick — no close, no model switch — is: stage a recap with  python3 \"$SCRUB\" --handoff --file <this-session.jsonl> --apply , then in this session run /clear and type 'continue' (the hook re-injects the recap). Only if that is unavailable, fall back to a new session.
+If a generation is blocked AGAIN before recovery completes, the fastest IN-PLACE unstick — no close, no model switch — is: stage a recap with  bash \"${CLAUDE_PLUGIN_ROOT:-}/scripts/run-python.sh\" \"$SCRUB\" --handoff --file <this-session.jsonl> --apply , then in this session run /clear and type 'continue' (the hook re-injects the recap). Only if that is unavailable, fall back to a new session.
 
 Pre-computed path: $PROJECT_PATH
 Keep all generated responses short. Execute edits via Edit tool — do not narrate."

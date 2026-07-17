@@ -256,7 +256,12 @@ def main():
         "project_only_classes": project_only_classes,
         "classification": classification,
         "refusal_categories": refusal_categories,
-        "scrub_command": f"python3 {SCRUB_SCRIPT} --fix-active --apply",
+        "scrub_command": (
+            f'bash "{os.environ.get("CLAUDE_PLUGIN_ROOT", "")}/scripts/run-python.sh" '
+            f'"{SCRUB_SCRIPT}" --fix-active --apply'
+            if os.environ.get("CLAUDE_PLUGIN_ROOT")
+            else f'python3 "{SCRUB_SCRIPT}" --fix-active --apply'
+        ),
         "trigger_text_snippet": trigger_text[:500],
     }
 
