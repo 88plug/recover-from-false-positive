@@ -30,14 +30,28 @@ def _sig(t):
     return any(s.lower() in low for s in (SIGNATURES + _FALLBACK))
 
 
+def _msg_dict(o):
+    """Return message dict, or {} if missing/non-dict."""
+    if not isinstance(o, dict):
+        return {}
+    m = o.get("message")
+    return m if isinstance(m, dict) else {}
+
+
+def _stop_details(o):
+    """Return stop_details dict from a turn, or {} if missing/non-dict."""
+    sd = _msg_dict(o).get("stop_details")
+    return sd if isinstance(sd, dict) else {}
+
+
 def _is_refusal(o):
     """Reword-proof + all-edges: structural via message.stop_reason=='refusal' OR
     stop_details.type=='refusal' (category-agnostic — fires on cyber, weapons, or any
     future category on day zero), OR a known text wording as a legacy fallback."""
     if not (isinstance(o, dict) and o.get("isApiErrorMessage")):
         return False
-    m = o.get("message") if isinstance(o.get("message"), dict) else {}
-    sd = m.get("stop_details") if isinstance(m.get("stop_details"), dict) else {}
+    m = _msg_dict(o)
+    sd = _stop_details(o)
     return (
         m.get("stop_reason") == "refusal"
         or sd.get("type") == "refusal"
@@ -46,9 +60,7 @@ def _is_refusal(o):
 
 
 def _refusal_category(o):
-    m = o.get("message") if isinstance(o.get("message"), dict) else {}
-    sd = m.get("stop_details") if isinstance(m.get("stop_details"), dict) else {}
-    return sd.get("category")
+    return _stop_details(o).get("category")
 
 
 STATE_FILE = os.path.expanduser("~/.claude/.fp-state.json")

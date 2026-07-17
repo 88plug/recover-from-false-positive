@@ -868,7 +868,7 @@ def handoff(path, apply=False):
     for o in objs:  # last compaction summary, if any
         if not isinstance(o, dict) or o.get("desaturated"):  # skip our own stubs
             continue
-        m = o.get("message") if isinstance(o.get("message"), dict) else {}
+        m = _msg(o)
         c = m.get("content", "")
         is_sum = o.get("isCompactSummary") or (
             isinstance(c, str) and "continued from a previous conversation" in c.lower()

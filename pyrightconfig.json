@@ -1,0 +1,6 @@
+{
+  "include": ["hooks", "skills", ".ci", "tests"],
+  "exclude": ["**/__pycache__", ".venv", "site", ".ruff_cache"],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic"
+}
