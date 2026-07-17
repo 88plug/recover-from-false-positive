@@ -218,7 +218,7 @@ Run this Python snippet directly, adjusting the trigger text:
 ```python
 import json, os
 
-path = "/home/andrew/.claude/projects/<slug>/<session-id>.jsonl"
+path = "/home/operator/.claude/projects/<slug>/<session-id>.jsonl"
 TRIGGER = "its back"   # exact text of the message that caused the block
 
 raw = open(path, encoding="utf-8", errors="surrogatepass").read().splitlines()
@@ -281,19 +281,19 @@ open(path, "w", encoding="utf-8").write("\n".join(out) + "\n")
 ### Issue 1: "No conversation found with session ID: ..."
 
 Claude Code uses `uv_fs_realpath` — it resolves symlinks in the cwd before
-constructing the project slug. If `~/pearl-bench` is a symlink to
-`~/cryptoandcoffee/pearl/pearl-bench`, the slug becomes
-`-home-andrew-cryptoandcoffee-pearl-pearl-bench`, not `-home-andrew-pearl-bench`.
+constructing the project slug. If `~/my-project` is a symlink to
+`~/org/team/my-project`, the slug becomes
+`-home-operator-org-team-my-project`, not `-home-operator-my-project`.
 
 **Fix**: create the alias slug dir:
 ```bash
 ln -s ~/.claude/projects/<original-slug> ~/.claude/projects/<resolved-slug>
 ```
 
-Example from this session:
+Example:
 ```bash
-ln -s ~/.claude/projects/-home-andrew-pearl-bench \
-      ~/.claude/projects/-home-andrew-cryptoandcoffee-pearl-pearl-bench
+ln -s ~/.claude/projects/-home-operator-my-project \
+      ~/.claude/projects/-home-operator-org-team-my-project
 ```
 
 To find the resolved slug: `readlink -f ~/project-dir` → replace `/` with `-`.

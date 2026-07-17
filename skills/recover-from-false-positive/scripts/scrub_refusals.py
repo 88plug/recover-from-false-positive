@@ -273,11 +273,11 @@ def find_targets(root):
 
 
 def decode_slug(slug_dir):
-    """Convert a project slug dir name (e.g. -home-andrew-pearl-bench) to the
+    """Convert a project slug dir name (e.g. -home-operator-my-project) to the
     real filesystem path. Slug is absolute path with / replaced by -.
     Strategy: at each position try joining remaining parts with - (preserving
-    project names that contain dashes) before splitting — so pearl-bench is
-    tried as one component before pearl/bench."""
+    project names that contain dashes) before splitting — so my-project is
+    tried as one component before my/project."""
     name = os.path.basename(slug_dir)
     if not name.startswith("-"):
         return None
