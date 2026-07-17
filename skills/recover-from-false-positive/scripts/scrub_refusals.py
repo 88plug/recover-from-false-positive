@@ -26,7 +26,14 @@ Usage:
   python3 scrub_refusals.py --root DIR --apply
   python3 scrub_refusals.py --json          # machine-readable dry-run report
 """
-import argparse, glob, json, os, sys, tarfile, time
+
+import argparse
+import glob
+import json
+import os
+import sys
+import tarfile
+import time
 
 # ── Detecting a classifier refusal turn, durably ────────────────────────────
 #
@@ -49,11 +56,11 @@ import argparse, glob, json, os, sys, tarfile, time
 # auto-logged (observe_novel_wording) so the maintainer can widen SIGNATURES — but
 # the tool already works without that. tests/smoke.sh pins both paths.
 API_ERR_PREFIX = "API Error"
-STRUCTURAL_STOP_REASON = "refusal"          # the reword-proof marker
+STRUCTURAL_STOP_REASON = "refusal"  # the reword-proof marker
 SIGNATURES = (
-    "appears to violate our Usage Policy",             # legacy usage-policy wording
+    "appears to violate our Usage Policy",  # legacy usage-policy wording
     "flagged this message for a cybersecurity topic",  # 2026-07 cyber-safeguards wording
-    "cyber-related safeguards",                         # alternate cyber wording
+    "cyber-related safeguards",  # alternate cyber wording
 )
 # Loose fallback markers — catch future rewordings. Only meaningful post-gate.
 _FALLBACK = ("cyber-use-case", "cybersecurity topic", "safeguards flagged")
@@ -100,11 +107,16 @@ def is_structural_refusal(obj):
     refusal, via EITHER message.stop_reason=='refusal' OR stop_details.type=='refusal'
     (both are set by the client from the server response, independent of wording or
     category). Catches cyber, weapons, and any future category on day zero."""
-    if not (isinstance(obj, dict) and obj.get("isApiErrorMessage")
-            and obj.get("type") in (None, "assistant")):
+    if not (
+        isinstance(obj, dict)
+        and obj.get("isApiErrorMessage")
+        and obj.get("type") in (None, "assistant")
+    ):
         return False
-    return (_stop_reason(obj) == STRUCTURAL_STOP_REASON
-            or _stop_details(obj).get("type") == STRUCTURAL_STOP_REASON)
+    return (
+        _stop_reason(obj) == STRUCTURAL_STOP_REASON
+        or _stop_details(obj).get("type") == STRUCTURAL_STOP_REASON
+    )
 
 
 def is_signature_refusal(obj):
@@ -153,7 +165,9 @@ def _text(obj):
         return c
     if isinstance(c, list):
         return " ".join(
-            b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text"
+            b.get("text", "")
+            for b in c
+            if isinstance(b, dict) and b.get("type") == "text"
         )
     return ""
 
@@ -162,11 +176,11 @@ def dangling_count(lines):
     """How many parentUuids point at a uuid that isn't present (parseable lines only).
     The first real turn legitimately has parentUuid null/absent — null never counts."""
     uuids, parents = set(), []
-    for l in lines:
-        if not l.strip():
+    for line in lines:
+        if not line.strip():
             continue
         try:
-            o = json.loads(l)
+            o = json.loads(line)
         except Exception:
             continue
         if o.get("uuid"):
@@ -185,11 +199,11 @@ def scrub_file(path):
 
     # pass 1 — map each refusal uuid -> its parentUuid (tolerate malformed lines)
     ref_parent = {}
-    for l in raw:
-        if not l.strip():
+    for line in raw:
+        if not line.strip():
             continue
         try:
-            o = json.loads(l)
+            o = json.loads(line)
         except Exception:
             continue
         if is_refusal(o):
@@ -206,14 +220,14 @@ def scrub_file(path):
         return p
 
     out, removed, restitched, malformed = [], 0, 0, 0
-    for l in raw:
-        if not l.strip():
-            out.append(l)
+    for line in raw:
+        if not line.strip():
+            out.append(line)
             continue
         try:
-            o = json.loads(l)
+            o = json.loads(line)
         except Exception:
-            out.append(l)  # pre-existing corruption — keep verbatim
+            out.append(line)  # pre-existing corruption — keep verbatim
             malformed += 1
             continue
         if is_refusal(o):
@@ -224,7 +238,7 @@ def scrub_file(path):
             restitched += 1
             out.append(json.dumps(o, ensure_ascii=False))
         else:
-            out.append(l)  # untouched original — byte-preserved
+            out.append(line)  # untouched original — byte-preserved
 
     delta = dangling_count(out) - dangling_count(raw)
     return out, removed, restitched, malformed, delta
@@ -242,11 +256,11 @@ def find_targets(root):
         # confirm at least one true refusal before full parse; also learn any
         # NEW wording caught structurally (so upstream rewords surface, not hide).
         found = False
-        for l in data.splitlines():
-            if not _has_marker(l):
+        for line in data.splitlines():
+            if not _has_marker(line):
                 continue
             try:
-                o = json.loads(l)
+                o = json.loads(line)
             except Exception:
                 continue
             if is_refusal(o):
@@ -309,10 +323,13 @@ def fix_active(path, apply=False):
 
     # collect: all refusal uuids, and the user turn(s) that are their ancestors
     ref_uuids = {}  # refusal_uuid -> parentUuid
-    for l in raw:
-        if not l.strip(): continue
-        try: o = json.loads(l)
-        except: continue
+    for line in raw:
+        if not line.strip():
+            continue
+        try:
+            o = json.loads(line)
+        except Exception:
+            continue
         if is_refusal(o):
             ref_uuids[o.get("uuid")] = o.get("parentUuid")
 
@@ -322,13 +339,15 @@ def fix_active(path, apply=False):
 
     # build uuid -> obj map for ancestor walking
     uuid_map = {}
-    for l in raw:
-        if not l.strip(): continue
+    for line in raw:
+        if not line.strip():
+            continue
         try:
-            o = json.loads(l)
+            o = json.loads(line)
             if o.get("uuid"):
                 uuid_map[o["uuid"]] = o
-        except: pass
+        except Exception:
+            pass
 
     remove_parent = dict(ref_uuids)  # uuid -> its_parentUuid for removed turns
 
@@ -339,7 +358,8 @@ def fix_active(path, apply=False):
         while cur and cur not in visited:
             visited.add(cur)
             o = uuid_map.get(cur)
-            if o is None: break
+            if o is None:
+                break
             m = o.get("message", {})
             role = m.get("role", "") if isinstance(m, dict) else o.get("type", "")
             if role == "user":
@@ -347,11 +367,17 @@ def fix_active(path, apply=False):
                 break
             cur = o.get("parentUuid")
 
-    print(f"  removing {len(remove_parent)} turns (trigger+refusal) from {os.path.basename(path)}")
+    print(
+        f"  removing {len(remove_parent)} turns (trigger+refusal) from {os.path.basename(path)}"
+    )
     if not apply:
         for uuid in remove_parent:
             o = uuid_map.get(uuid, {})
-            role = o.get("message", {}).get("role", o.get("type", "?")) if isinstance(o.get("message"), dict) else o.get("type", "?")
+            role = (
+                o.get("message", {}).get("role", o.get("type", "?"))
+                if isinstance(o.get("message"), dict)
+                else o.get("type", "?")
+            )
             content = _text(o)[:80]
             print(f"    uuid={uuid[:8]} role={role}: {content!r}")
         return
@@ -359,15 +385,21 @@ def fix_active(path, apply=False):
     def resolve(p, seen=None):
         seen = seen or set()
         while p in remove_parent and p not in seen:
-            seen.add(p); p = remove_parent[p]
+            seen.add(p)
+            p = remove_parent[p]
         return p
 
     out = []
     removed = restitched = 0
-    for l in raw:
-        if not l.strip(): out.append(l); continue
-        try: o = json.loads(l)
-        except: out.append(l); continue
+    for line in raw:
+        if not line.strip():
+            out.append(line)
+            continue
+        try:
+            o = json.loads(line)
+        except Exception:
+            out.append(line)
+            continue
         if o.get("uuid") in remove_parent:
             removed += 1
             continue
@@ -376,7 +408,7 @@ def fix_active(path, apply=False):
             restitched += 1
             out.append(json.dumps(o, ensure_ascii=False))
         else:
-            out.append(l)
+            out.append(line)
 
     stamp = int(time.time())
     backup = os.path.expanduser(f"~/.claude/refusal-scrub-backup-{stamp}.tar.gz")
@@ -388,7 +420,9 @@ def fix_active(path, apply=False):
     with open(tmp, "w", encoding="utf-8") as fh:
         fh.write("\n".join(out) + "\n")
     os.replace(tmp, path)
-    print(f"  OK removed={removed} restitched={restitched} kept={len(out)} (was {len(raw)})")
+    print(
+        f"  OK removed={removed} restitched={restitched} kept={len(out)} (was {len(raw)})"
+    )
 
 
 # ── De-saturation ────────────────────────────────────────────────────────────
@@ -403,24 +437,65 @@ def fix_active(path, apply=False):
 # never change block types or tool_use_ids, so resume can't break on a dangling
 # tool call). Chain is untouched (no turn removed → zero dangling delta). Lossy but
 # fully reversible from the backup. This is what actually revives a stuck session.
-STUB = ("[de-saturated by recover-from-false-positive — dense content trimmed so the "
-        "output classifier does not re-fire on resume; verbatim original is in the backup]")
+STUB = (
+    "[de-saturated by recover-from-false-positive — dense content trimmed so the "
+    "output classifier does not re-fire on resume; verbatim original is in the backup]"
+)
 
 # Domain-general poison vocabulary, drawn from the known trigger classes. Scoring a
 # turn by hits across ALL classes keeps this useful beyond any one project; the
 # active session's own cluster (from ~/.claude/.fp-state.json) is merged in too.
 _DESAT_TERMS = (
-    "cosign", "sigstore", "attestation", "provenance", "slsa", "fulcio", "rekor",
-    "in-toto", "keyless", "hashrate", "nonce", "coinbase", "randomx", "cryptonight",
-    "blake3", "dev-fee", "lnd", "lndinit", "bitcoind", "lightning", "wallet-unlock",
-    "failover", "gauntlet", "raft", "teardown", "codegen", "noder", "cmd/compile",
-    "share-generics", "generic instantiation", "instantiation", "redundant compil",
-    "extern-template", "incremental compile", "toolchain", "first-build",
-    "build acceleration", "sigma rule", "ueba", "threat detection",
+    "cosign",
+    "sigstore",
+    "attestation",
+    "provenance",
+    "slsa",
+    "fulcio",
+    "rekor",
+    "in-toto",
+    "keyless",
+    "hashrate",
+    "nonce",
+    "coinbase",
+    "randomx",
+    "cryptonight",
+    "blake3",
+    "dev-fee",
+    "lnd",
+    "lndinit",
+    "bitcoind",
+    "lightning",
+    "wallet-unlock",
+    "failover",
+    "gauntlet",
+    "raft",
+    "teardown",
+    "codegen",
+    "noder",
+    "cmd/compile",
+    "share-generics",
+    "generic instantiation",
+    "instantiation",
+    "redundant compil",
+    "extern-template",
+    "incremental compile",
+    "toolchain",
+    "first-build",
+    "build acceleration",
+    "sigma rule",
+    "ueba",
+    "threat detection",
     # the classifier's OWN vocabulary — a session where /recover was (mistakenly) run
     # in-place has the skill body injected as turns, which is itself dense poison.
-    "cyber-related safeguards", "cybersecurity", "usage policy", "cyber-use-case",
-    "output classifier", "content filter", "safeguard", "false positive",
+    "cyber-related safeguards",
+    "cybersecurity",
+    "usage policy",
+    "cyber-use-case",
+    "output classifier",
+    "content filter",
+    "safeguard",
+    "false positive",
 )
 # Any window turn at least this large is stubbed regardless of vocabulary — big turns
 # (huge tool_result file reads, injected skill bodies) are what saturate the window,
@@ -432,7 +507,9 @@ _WINDOW_BOUNDARY_SUBTYPES = {"compact_boundary", "microcompact_boundary"}
 def _extra_terms():
     """Merge in the active session's own detected vocab cluster, if the hook wrote one."""
     try:
-        st = json.load(open(os.path.expanduser("~/.claude/.fp-state.json"), encoding="utf-8"))
+        st = json.load(
+            open(os.path.expanduser("~/.claude/.fp-state.json"), encoding="utf-8")
+        )
         terms = []
         for hits in (st.get("vocab_clusters") or {}).values():
             terms += [h for h in hits if isinstance(h, str)]
@@ -487,9 +564,9 @@ def _stub_block(b):
     t = b.get("type")
     if t == "text":
         return {**b, "text": STUB}
-    if t == "tool_result":       # keep tool_use_id + type → pairing intact
+    if t == "tool_result":  # keep tool_use_id + type → pairing intact
         return {**b, "content": STUB}
-    return b                     # tool_use / thinking / image left structurally intact
+    return b  # tool_use / thinking / image left structurally intact
 
 
 def _stub_message_content(o):
@@ -514,11 +591,13 @@ def desaturate_lines(raw, keep_recent=6, min_score=4, terms=None):
     user/assistant turns in the live window, preserving chain + tool pairing."""
     terms = tuple(terms) if terms else (_DESAT_TERMS + _extra_terms())
     objs, idx_of = [], []
-    for n, l in enumerate(raw):
-        if not l.strip():
-            objs.append(None); idx_of.append(n); continue
+    for n, line in enumerate(raw):
+        if not line.strip():
+            objs.append(None)
+            idx_of.append(n)
+            continue
         try:
-            objs.append(json.loads(l))
+            objs.append(json.loads(line))
         except Exception:
             objs.append(None)
         idx_of.append(n)
@@ -542,18 +621,20 @@ def desaturate_lines(raw, keep_recent=6, min_score=4, terms=None):
             targets[n] = sc
 
     out, stubbed, saved, manifest = [], 0, 0, []
-    for n, l in enumerate(raw):
+    for n, line in enumerate(raw):
         o = objs[n] if n < len(objs) else None
         if isinstance(o, dict) and n in targets:
             stub = _stub_message_content(o)
             new_l = json.dumps(stub, ensure_ascii=False)
-            saved += max(0, len(l) - len(new_l))
+            saved += max(0, len(line) - len(new_l))
             stubbed += 1
             role = (o.get("message", {}) or {}).get("role", o.get("type"))
-            manifest.append((n, targets[n], role, " ".join(_dense_text(o).split())[:60]))
+            manifest.append(
+                (n, targets[n], role, " ".join(_dense_text(o).split())[:60])
+            )
             out.append(new_l)
         else:
-            out.append(l)
+            out.append(line)
     return out, stubbed, saved, manifest
 
 
@@ -563,13 +644,21 @@ def _blocks(o):
 
 
 def _use_ids(o):
-    return [b.get("id") for b in _blocks(o)
-            if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id")]
+    return [
+        b.get("id")
+        for b in _blocks(o)
+        if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id")
+    ]
 
 
 def _result_ids(o):
-    return [b.get("tool_use_id") for b in _blocks(o)
-            if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id")]
+    return [
+        b.get("tool_use_id")
+        for b in _blocks(o)
+        if isinstance(b, dict)
+        and b.get("type") == "tool_result"
+        and b.get("tool_use_id")
+    ]
 
 
 def surgical_lines(raw, keep_recent=6, min_score=4, terms=None):
@@ -582,12 +671,13 @@ def surgical_lines(raw, keep_recent=6, min_score=4, terms=None):
     Returns (out_lines, dropped, bytes_freed, manifest)."""
     terms = tuple(terms) if terms else (_DESAT_TERMS + _extra_terms())
     objs = []
-    for l in raw:
-        s = l.strip()
+    for line in raw:
+        s = line.strip()
         if not s:
-            objs.append(None); continue
+            objs.append(None)
+            continue
         try:
-            objs.append(json.loads(l))
+            objs.append(json.loads(line))
         except Exception:
             objs.append(None)
     real = [(i, o) for i, o in enumerate(objs) if isinstance(o, dict)]
@@ -615,7 +705,7 @@ def surgical_lines(raw, keep_recent=6, min_score=4, terms=None):
     drop = set()
     for seed in seeds:
         group, stack = set(), [seed]
-        while stack:                                   # close over tool_use/tool_result pairs
+        while stack:  # close over tool_use/tool_result pairs
             i = stack.pop()
             if i in group:
                 continue
@@ -633,35 +723,46 @@ def surgical_lines(raw, keep_recent=6, min_score=4, terms=None):
             continue
         drop |= group
 
-    remove_parent = {objs[i].get("uuid"): objs[i].get("parentUuid")
-                     for i in drop if objs[i].get("uuid")}
+    remove_parent = {
+        objs[i].get("uuid"): objs[i].get("parentUuid")
+        for i in drop
+        if objs[i].get("uuid")
+    }
 
     def resolve(p, seen=None):
         seen = seen or set()
         while p in remove_parent and p not in seen:
-            seen.add(p); p = remove_parent[p]
+            seen.add(p)
+            p = remove_parent[p]
         return p
 
     out, dropped, freed, manifest = [], 0, 0, []
-    for i, l in enumerate(raw):
+    for i, line in enumerate(raw):
         o = objs[i] if i < len(objs) else None
         if isinstance(o, dict) and i in drop:
             dropped += 1
-            freed += len(l)
-            manifest.append((i, _turn_score(o, terms), _msg(o).get("role") or o.get("type"),
-                             " ".join(_dense_text(o).split())[:60]))
+            freed += len(line)
+            manifest.append(
+                (
+                    i,
+                    _turn_score(o, terms),
+                    _msg(o).get("role") or o.get("type"),
+                    " ".join(_dense_text(o).split())[:60],
+                )
+            )
             continue
         if isinstance(o, dict) and o.get("parentUuid") in remove_parent:
             o = dict(o)
             o["parentUuid"] = resolve(o["parentUuid"])
             out.append(json.dumps(o, ensure_ascii=False))
         else:
-            out.append(l)                              # BYTE-EXACT — word-for-word kept
+            out.append(line)  # BYTE-EXACT — word-for-word kept
     return out, dropped, freed, manifest
 
 
-def desaturate_and_write(path, apply=False, keep_recent=6, min_score=4,
-                         backup_tag="desat", stub=False):
+def desaturate_and_write(
+    path, apply=False, keep_recent=6, min_score=4, backup_tag="desat", stub=False
+):
     """Default = SURGICAL: drop whole offending turns, keep the rest word-for-word.
     stub=True falls back to the older in-place neutralization (kept for callers that
     need the transcript to stay the same length)."""
@@ -673,15 +774,19 @@ def desaturate_and_write(path, apply=False, keep_recent=6, min_score=4,
         out, n, saved, manifest = surgical_lines(raw, keep_recent, min_score)
         verb, unit = "dropped", saved
     if not n:
-        print(f"  de-saturate: nothing dense enough to touch in {os.path.basename(path)}")
+        print(
+            f"  de-saturate: nothing dense enough to touch in {os.path.basename(path)}"
+        )
         return 0
     delta = dangling_count(out) - dangling_count(raw)
-    print(f"  de-saturate ({'stub' if stub else 'surgical'}): {verb} {n} offending turn(s), "
-          f"~{unit//1024}KB, delta={delta:+d}, rest byte-exact — {os.path.basename(path)}")
+    print(
+        f"  de-saturate ({'stub' if stub else 'surgical'}): {verb} {n} offending turn(s), "
+        f"~{unit // 1024}KB, delta={delta:+d}, rest byte-exact — {os.path.basename(path)}"
+    )
     for ln, sc, role, prev in manifest[:8]:
         print(f"    line {ln} score={sc} {role}: {prev!r}")
     if len(manifest) > 8:
-        print(f"    … +{len(manifest)-8} more")
+        print(f"    … +{len(manifest) - 8} more")
     if delta > 0:
         print("  ! would increase dangling pointers — refusing to write this file.")
         return 0
@@ -702,12 +807,12 @@ def desaturate_and_write(path, apply=False, keep_recent=6, min_score=4,
 def refusal_count(path):
     n = 0
     try:
-        for l in open(path, encoding="utf-8", errors="surrogatepass"):
-            l = l.strip()
-            if not l or "isApiErrorMessage" not in l:
+        for line in open(path, encoding="utf-8", errors="surrogatepass"):
+            line = line.strip()
+            if not line or "isApiErrorMessage" not in line:
                 continue
             try:
-                if is_refusal(json.loads(l)):
+                if is_refusal(json.loads(line)):
                     n += 1
             except Exception:
                 continue
@@ -726,13 +831,16 @@ def _neutralize(text, terms=None):
     code + long paths, replace trigger vocab with a neutral placeholder, collapse space,
     cap length. The result must be safe to re-inject into a live session without tripping."""
     import re
+
     terms = tuple(terms) if terms else (_DESAT_TERMS + _extra_terms())
-    text = re.sub(r"```.*?```", " [code omitted] ", text, flags=re.S)     # drop code blocks
-    text = re.sub(r"(/[\w.\-]+){3,}", " [path] ", text)                    # drop long paths
+    text = re.sub(
+        r"```.*?```", " [code omitted] ", text, flags=re.S
+    )  # drop code blocks
+    text = re.sub(r"(/[\w.\-]+){3,}", " [path] ", text)  # drop long paths
     for t in sorted(terms, key=len, reverse=True):
         text = re.sub(re.escape(t), "[detail]", text, flags=re.I)
-    text = re.sub(r"\[detail\]\w*", "[detail]", text)                     # eat term suffixes
-    text = re.sub(r"\[detail\]([\s,]*\[detail\])+", "[detail]", text)      # collapse runs
+    text = re.sub(r"\[detail\]\w*", "[detail]", text)  # eat term suffixes
+    text = re.sub(r"\[detail\]([\s,]*\[detail\])+", "[detail]", text)  # collapse runs
     text = re.sub(r"\s+", " ", text).strip()
     return text[:1600]
 
@@ -744,12 +852,12 @@ def handoff(path, apply=False):
     injects it on the next prompt. Prefers the transcript's own last compaction summary
     (LLM-quality, already written) so we neutralize rather than regenerate."""
     objs, cwd = [], ""
-    for l in open(path, encoding="utf-8", errors="surrogatepass"):
-        l = l.strip()
-        if not l:
+    for line in open(path, encoding="utf-8", errors="surrogatepass"):
+        line = line.strip()
+        if not line:
             continue
         try:
-            o = json.loads(l)
+            o = json.loads(line)
         except Exception:
             continue
         objs.append(o)
@@ -757,28 +865,38 @@ def handoff(path, apply=False):
             cwd = o["cwd"]
 
     summary = ""
-    for o in objs:                                   # last compaction summary, if any
-        if not isinstance(o, dict) or o.get("desaturated"):   # skip our own stubs
+    for o in objs:  # last compaction summary, if any
+        if not isinstance(o, dict) or o.get("desaturated"):  # skip our own stubs
             continue
         m = o.get("message") if isinstance(o.get("message"), dict) else {}
         c = m.get("content", "")
-        is_sum = o.get("isCompactSummary") or (isinstance(c, str)
-                 and "continued from a previous conversation" in c.lower())
+        is_sum = o.get("isCompactSummary") or (
+            isinstance(c, str) and "continued from a previous conversation" in c.lower()
+        )
         if is_sum:
             summary = c if isinstance(c, str) else _dense_text(o)
-    if not summary:                                  # fallback: recent real user intent
-        ut = [_dense_text(o) for o in objs
-              if isinstance(o, dict) and o.get("type") == "user"
-              and not o.get("isMeta") and not o.get("desaturated")]
+    if not summary:  # fallback: recent real user intent
+        ut = [
+            _dense_text(o)
+            for o in objs
+            if isinstance(o, dict)
+            and o.get("type") == "user"
+            and not o.get("isMeta")
+            and not o.get("desaturated")
+        ]
         summary = "\n".join(ut[-5:])
 
     recap = _neutralize(summary)
-    anchor = ("[continuity recap — prior context was cleared to recover from a false-positive "
-              "classifier trip; keep working, do not re-close or switch models]\n\n" + recap)
+    anchor = (
+        "[continuity recap — prior context was cleared to recover from a false-positive "
+        "classifier trip; keep working, do not re-close or switch models]\n\n" + recap
+    )
     print(f"De-saturated recap ({len(anchor)} chars) for cwd={cwd or '?'}:")
     print("  " + anchor[:280].replace("\n", " ") + (" …" if len(anchor) > 280 else ""))
     if not apply:
-        print("\nDry run. Re-run with --handoff --file … --apply to stage the re-injection.")
+        print(
+            "\nDry run. Re-run with --handoff --file … --apply to stage the re-injection."
+        )
         return
     slug = _cwd_slug(cwd)
     if not slug:
@@ -790,8 +908,12 @@ def handoff(path, apply=False):
         fh.write(anchor + "\n")
     print(f"\nStaged: {out}")
     print("Now, IN THE STUCK SESSION (no close, no model change):")
-    print("  1. /clear        ← empties in-memory context locally, never generates → no trip")
-    print("  2. type: continue ← the hook re-injects this recap once, and you keep going")
+    print(
+        "  1. /clear        ← empties in-memory context locally, never generates → no trip"
+    )
+    print(
+        "  2. type: continue ← the hook re-injects this recap once, and you keep going"
+    )
 
 
 def backtest(root):
@@ -803,12 +925,12 @@ def backtest(root):
     for f in files:
         try:
             objs = []
-            for l in open(f, encoding="utf-8", errors="surrogatepass"):
-                l = l.strip()
-                if not l:
+            for line in open(f, encoding="utf-8", errors="surrogatepass"):
+                line = line.strip()
+                if not line:
                     continue
                 try:
-                    objs.append(json.loads(l))
+                    objs.append(json.loads(line))
                 except Exception:
                     continue
         except Exception:
@@ -823,13 +945,17 @@ def backtest(root):
         if dense >= 25 and wb > 200_000:
             atrisk.append((dense, wb, len(win), f))
     atrisk.sort(reverse=True)
-    print(f"── backtest: {scanned} sessions scanned, {len(atrisk)} at-risk "
-          f"(dense+large resume window → would re-trip on --resume) ──")
+    print(
+        f"── backtest: {scanned} sessions scanned, {len(atrisk)} at-risk "
+        f"(dense+large resume window → would re-trip on --resume) ──"
+    )
     for d, b, n, f in atrisk[:20]:
-        print(f"  density={d:>4} window={b//1024:>6}KB turns={n:>4}  {f}")
+        print(f"  density={d:>4} window={b // 1024:>6}KB turns={n:>4}  {f}")
     if len(atrisk) > 20:
-        print(f"  … +{len(atrisk)-20} more")
-    print("De-saturate any of these before resuming:  --desaturate --file <path> --apply")
+        print(f"  … +{len(atrisk) - 20} more")
+    print(
+        "De-saturate any of these before resuming:  --desaturate --file <path> --apply"
+    )
     return atrisk
 
 
@@ -841,26 +967,32 @@ def selfcheck(root):
     total_err = struct = sigmatch = novel = other = 0
     novels = []
     from collections import Counter
+
     categories = Counter()
     for path in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True):
         try:
             data = open(path, encoding="utf-8", errors="ignore")
         except Exception:
             continue
-        for l in data:
-            if "isApiErrorMessage" not in l:
+        for line in data:
+            if "isApiErrorMessage" not in line:
                 continue
             try:
-                o = json.loads(l)
+                o = json.loads(line)
             except Exception:
                 continue
             if not (isinstance(o, dict) and o.get("isApiErrorMessage")):
                 continue
             total_err += 1
-            s = is_structural_refusal(o); g = is_signature_refusal(o)
-            if s and g: struct += 1; sigmatch += 1
-            elif s: struct += 1
-            elif g: sigmatch += 1
+            s = is_structural_refusal(o)
+            g = is_signature_refusal(o)
+            if s and g:
+                struct += 1
+                sigmatch += 1
+            elif s:
+                struct += 1
+            elif g:
+                sigmatch += 1
             else:
                 other += 1
                 continue
@@ -873,8 +1005,12 @@ def selfcheck(root):
 
     print("── recover-from-false-positive self-check ──")
     print("detection contract: isApiErrorMessage:true AND (")
-    print("   message.stop_reason=='refusal' OR stop_details.type=='refusal'  [structural, reword+category-proof]")
-    print(f"   OR known SIGNATURES text [{len(SIGNATURES)} known])  — category read from stop_details.category")
+    print(
+        "   message.stop_reason=='refusal' OR stop_details.type=='refusal'  [structural, reword+category-proof]"
+    )
+    print(
+        f"   OR known SIGNATURES text [{len(SIGNATURES)} known])  — category read from stop_details.category"
+    )
     print(f"isApiErrorMessage turns scanned : {total_err}")
     print(f"  classified as refusal (structural) : {struct}")
     print(f"  classified as refusal (signature)  : {sigmatch}")
@@ -885,7 +1021,9 @@ def selfcheck(root):
         for cat, n in categories.most_common():
             print(f"    {cat}: {n}")
     if novel:
-        print(f"⚠ {novel} refusal(s) matched STRUCTURALLY but not any known string — a new wording.")
+        print(
+            f"⚠ {novel} refusal(s) matched STRUCTURALLY but not any known string — a new wording."
+        )
         print(f"  Logged to {OBSERVED_LOG}. Consider adding to SIGNATURES:")
         for s in novels[:5]:
             print(f"    · {s!r}")
@@ -896,8 +1034,10 @@ def selfcheck(root):
             blob = open(vers[-1], "rb").read()
             for field in (b"isApiErrorMessage", b"stop_reason", b"refusal"):
                 if blob.find(field) < 0:
-                    print(f"⚠ installed Claude Code ({os.path.basename(vers[-1])}) no longer mentions "
-                          f"{field.decode()!r} — detection contract may have drifted; review.")
+                    print(
+                        f"⚠ installed Claude Code ({os.path.basename(vers[-1])}) no longer mentions "
+                        f"{field.decode()!r} — detection contract may have drifted; review."
+                    )
         except Exception:
             pass
     print("(structural detection means a reworded error is still caught on day zero.)")
@@ -906,40 +1046,77 @@ def selfcheck(root):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=os.path.expanduser("~/.claude/projects"))
-    ap.add_argument("--apply", action="store_true", help="write changes (default: dry run)")
+    ap.add_argument(
+        "--apply", action="store_true", help="write changes (default: dry run)"
+    )
     ap.add_argument("--json", action="store_true", help="machine-readable report")
-    ap.add_argument("--latest", action="store_true",
-                    help="print decoded project path of the most recently modified refusal file")
-    ap.add_argument("--fix-active", action="store_true",
-                    help="remove the trigger+refusal from the most recent refusal file AND "
-                         "(when the session is saturated) de-saturate its live window so it "
-                         "resumes without re-tripping; covers subagent shards too")
-    ap.add_argument("--desaturate", action="store_true",
-                    help="force in-place de-saturation of the most recent refusal session "
-                         "(stub vocabulary-dense turns in the resume window; reversible)")
-    ap.add_argument("--no-desaturate", action="store_true",
-                    help="disable the default de-saturation inside --fix-active")
-    ap.add_argument("--stub", action="store_true",
-                    help="de-saturate by neutralizing content in place (keeps transcript "
-                         "length) instead of the default SURGICAL drop (removes whole "
-                         "offending turns, keeps every other turn byte-exact)")
-    ap.add_argument("--file", default=None,
-                    help="explicit session .jsonl to target (for --desaturate on a session "
-                         "whose refusal turns were already scrubbed but is still saturated)")
-    ap.add_argument("--selfcheck", action="store_true",
-                    help="durability audit: prove the detector still matches reality and "
-                         "surface any new wording or upstream field drift (fail loud)")
-    ap.add_argument("--backtest", action="store_true",
-                    help="scan ALL sessions on the machine and list the ones whose resume "
-                         "window is dense+large enough to re-trip (prevention triage)")
-    ap.add_argument("--handoff", action="store_true",
-                    help="stage a de-saturated recap for the 'clear then reinject' flow: user "
-                         "runs /clear in the stuck session and the hook re-injects it — no "
-                         "close, no model switch. Use with --file <session.jsonl> [--apply]")
-    ap.add_argument("--keep-recent", type=int, default=6,
-                    help="de-saturate: leave the last N turns untouched (default 6)")
-    ap.add_argument("--desat-min-score", type=int, default=4,
-                    help="de-saturate: min trigger-vocab hits for a turn to be stubbed (default 4)")
+    ap.add_argument(
+        "--latest",
+        action="store_true",
+        help="print decoded project path of the most recently modified refusal file",
+    )
+    ap.add_argument(
+        "--fix-active",
+        action="store_true",
+        help="remove the trigger+refusal from the most recent refusal file AND "
+        "(when the session is saturated) de-saturate its live window so it "
+        "resumes without re-tripping; covers subagent shards too",
+    )
+    ap.add_argument(
+        "--desaturate",
+        action="store_true",
+        help="force in-place de-saturation of the most recent refusal session "
+        "(stub vocabulary-dense turns in the resume window; reversible)",
+    )
+    ap.add_argument(
+        "--no-desaturate",
+        action="store_true",
+        help="disable the default de-saturation inside --fix-active",
+    )
+    ap.add_argument(
+        "--stub",
+        action="store_true",
+        help="de-saturate by neutralizing content in place (keeps transcript "
+        "length) instead of the default SURGICAL drop (removes whole "
+        "offending turns, keeps every other turn byte-exact)",
+    )
+    ap.add_argument(
+        "--file",
+        default=None,
+        help="explicit session .jsonl to target (for --desaturate on a session "
+        "whose refusal turns were already scrubbed but is still saturated)",
+    )
+    ap.add_argument(
+        "--selfcheck",
+        action="store_true",
+        help="durability audit: prove the detector still matches reality and "
+        "surface any new wording or upstream field drift (fail loud)",
+    )
+    ap.add_argument(
+        "--backtest",
+        action="store_true",
+        help="scan ALL sessions on the machine and list the ones whose resume "
+        "window is dense+large enough to re-trip (prevention triage)",
+    )
+    ap.add_argument(
+        "--handoff",
+        action="store_true",
+        help="stage a de-saturated recap for the 'clear then reinject' flow: user "
+        "runs /clear in the stuck session and the hook re-injects it — no "
+        "close, no model switch. Use with --file <session.jsonl> [--apply]",
+    )
+    ap.add_argument(
+        "--keep-recent",
+        type=int,
+        default=6,
+        help="de-saturate: leave the last N turns untouched (default 6)",
+    )
+    ap.add_argument(
+        "--desat-min-score",
+        type=int,
+        default=4,
+        help="de-saturate: min trigger-vocab hits for a turn to be stubbed (default 4)",
+    )
     args = ap.parse_args()
 
     if args.selfcheck:
@@ -952,10 +1129,12 @@ def main():
 
     if args.handoff:
         if not args.file:
-            print("--handoff needs --file <session.jsonl>"); sys.exit(1)
+            print("--handoff needs --file <session.jsonl>")
+            sys.exit(1)
         f = os.path.abspath(os.path.expanduser(args.file))
         if not os.path.exists(f):
-            print(f"No such file: {f}"); sys.exit(1)
+            print(f"No such file: {f}")
+            sys.exit(1)
         handoff(f, apply=args.apply)
         return
 
@@ -963,22 +1142,36 @@ def main():
         if args.file:
             newest = os.path.abspath(os.path.expanduser(args.file))
             if not os.path.exists(newest):
-                print(f"No such file: {newest}"); sys.exit(1)
+                print(f"No such file: {newest}")
+                sys.exit(1)
         else:
             targets = find_targets(args.root)
             if not targets:
-                print("No refusal files found. A saturated session whose refusals were "
-                      "already scrubbed has no marker — point at it with --file <session.jsonl>.")
+                print(
+                    "No refusal files found. A saturated session whose refusals were "
+                    "already scrubbed has no marker — point at it with --file <session.jsonl>."
+                )
                 return
             newest = max(targets, key=lambda p: os.path.getmtime(p))
         print(f"De-saturate: {newest}")
-        desaturate_and_write(newest, apply=args.apply,
-                             keep_recent=args.keep_recent, min_score=args.desat_min_score, stub=args.stub)
+        desaturate_and_write(
+            newest,
+            apply=args.apply,
+            keep_recent=args.keep_recent,
+            min_score=args.desat_min_score,
+            stub=args.stub,
+        )
         # subagent shards share the trip's vocabulary — de-saturate them too
         shard_dir = os.path.splitext(newest)[0]
         for s in glob.glob(os.path.join(shard_dir, "**", "*.jsonl"), recursive=True):
-            desaturate_and_write(s, apply=args.apply, keep_recent=args.keep_recent,
-                                 min_score=args.desat_min_score, backup_tag="desat-shard", stub=args.stub)
+            desaturate_and_write(
+                s,
+                apply=args.apply,
+                keep_recent=args.keep_recent,
+                min_score=args.desat_min_score,
+                backup_tag="desat-shard",
+                stub=args.stub,
+            )
         if not args.apply:
             print("\nDry run. Re-run with --desaturate --apply to write.")
         return
@@ -1006,25 +1199,39 @@ def main():
         do_desat = saturated and not args.no_desaturate
         fix_active(newest, apply=args.apply)
         if do_desat:
-            print("  session is saturated (repeated trips) → de-saturating live window "
-                  "so resume won't re-fire (use --no-desaturate to skip):")
-            desaturate_and_write(newest, apply=args.apply,
-                                 keep_recent=args.keep_recent, min_score=args.desat_min_score, stub=args.stub)
+            print(
+                "  session is saturated (repeated trips) → de-saturating live window "
+                "so resume won't re-fire (use --no-desaturate to skip):"
+            )
+            desaturate_and_write(
+                newest,
+                apply=args.apply,
+                keep_recent=args.keep_recent,
+                min_score=args.desat_min_score,
+                stub=args.stub,
+            )
         # A trip also poisons this session's SUBAGENT shards, which live under
         # <session-stem>/subagents/**/*.jsonl — fix_active only touches the main
         # file, so scrub the shards too (chain-safe, self-verifying per file).
         shard_dir = os.path.splitext(newest)[0]
-        shards = [s for s in glob.glob(os.path.join(shard_dir, "**", "*.jsonl"), recursive=True)
-                  if _has_marker(open(s, encoding="utf-8", errors="ignore").read())]
+        shards = [
+            s
+            for s in glob.glob(os.path.join(shard_dir, "**", "*.jsonl"), recursive=True)
+            if _has_marker(open(s, encoding="utf-8", errors="ignore").read())
+        ]
         shard_plans = []
         for s in shards:
             out, removed, restitched, malformed, delta = scrub_file(s)
             if removed:
                 shard_plans.append((s, out, removed, delta))
-                print(f"  subagent shard: {removed} refusal(s), delta={delta:+d} {os.path.basename(s)}")
+                print(
+                    f"  subagent shard: {removed} refusal(s), delta={delta:+d} {os.path.basename(s)}"
+                )
         if args.apply and shard_plans:
             stamp = int(time.time())
-            backup = os.path.expanduser(f"~/.claude/refusal-scrub-shards-{stamp}.tar.gz")
+            backup = os.path.expanduser(
+                f"~/.claude/refusal-scrub-shards-{stamp}.tar.gz"
+            )
             with tarfile.open(backup, "w:gz") as tar:
                 for s, *_ in shard_plans:
                     tar.add(s)
@@ -1039,9 +1246,17 @@ def main():
                 os.replace(tmp, s)
         # de-saturate shards too when the session is saturated
         if do_desat:
-            for s in glob.glob(os.path.join(shard_dir, "**", "*.jsonl"), recursive=True):
-                desaturate_and_write(s, apply=args.apply, keep_recent=args.keep_recent,
-                                     min_score=args.desat_min_score, backup_tag="desat-shard", stub=args.stub)
+            for s in glob.glob(
+                os.path.join(shard_dir, "**", "*.jsonl"), recursive=True
+            ):
+                desaturate_and_write(
+                    s,
+                    apply=args.apply,
+                    keep_recent=args.keep_recent,
+                    min_score=args.desat_min_score,
+                    backup_tag="desat-shard",
+                    stub=args.stub,
+                )
         if not args.apply:
             print("\nDry run. Re-run with --fix-active --apply to write.")
         return
@@ -1050,17 +1265,34 @@ def main():
     plans = []
     for f in targets:
         out, removed, restitched, malformed, delta = scrub_file(f)
-        plans.append(dict(file=f, removed=removed, restitched=restitched,
-                          malformed=malformed, delta=delta, new_lines=out))
+        plans.append(
+            dict(
+                file=f,
+                removed=removed,
+                restitched=restitched,
+                malformed=malformed,
+                delta=delta,
+                new_lines=out,
+            )
+        )
 
     total_removed = sum(p["removed"] for p in plans)
     unsafe = [p for p in plans if p["delta"] > 0]
 
     if not args.apply:
-        report = dict(root=args.root, files=len(plans), refusals=total_removed,
-                      unsafe_files=len(unsafe),
-                      detail=[{k: p[k] for k in ("file", "removed", "restitched",
-                               "malformed", "delta")} for p in plans])
+        report = dict(
+            root=args.root,
+            files=len(plans),
+            refusals=total_removed,
+            unsafe_files=len(unsafe),
+            detail=[
+                {
+                    k: p[k]
+                    for k in ("file", "removed", "restitched", "malformed", "delta")
+                }
+                for p in plans
+            ],
+        )
         print(json.dumps(report, indent=2) if args.json else _human(report))
         return
 
@@ -1087,26 +1319,37 @@ def main():
             fh.write("\n".join(p["new_lines"]) + "\n")
         os.replace(tmp, p["file"])
         written += 1
-        print(f"  OK removed={p['removed']} restitched={p['restitched']} "
-              f"malformed_preserved={p['malformed']} {os.path.basename(p['file'])}")
+        print(
+            f"  OK removed={p['removed']} restitched={p['restitched']} "
+            f"malformed_preserved={p['malformed']} {os.path.basename(p['file'])}"
+        )
 
-    print(f"\nDONE: {total_removed} refusals removed from {written} files; "
-          f"{len(skipped)} skipped. Backup at {backup}")
+    print(
+        f"\nDONE: {total_removed} refusals removed from {written} files; "
+        f"{len(skipped)} skipped. Backup at {backup}"
+    )
     if skipped:
-        print("Skipped files had a positive dangling-delta — inspect by hand, "
-              "restore from backup if needed.")
+        print(
+            "Skipped files had a positive dangling-delta — inspect by hand, "
+            "restore from backup if needed."
+        )
 
 
 def _human(r):
-    lines = [f"Root: {r['root']}",
-             f"Files with refusals: {r['files']}",
-             f"Total refusal turns: {r['refusals']}",
-             f"Files the scrub would BREAK (delta>0): {r['unsafe_files']}", ""]
+    lines = [
+        f"Root: {r['root']}",
+        f"Files with refusals: {r['files']}",
+        f"Total refusal turns: {r['refusals']}",
+        f"Files the scrub would BREAK (delta>0): {r['unsafe_files']}",
+        "",
+    ]
     for d in r["detail"]:
         flag = "  ⚠ UNSAFE" if d["delta"] > 0 else ""
-        lines.append(f"  {d['removed']}x refusal, {d['restitched']} re-stitch, "
-                     f"{d['malformed']} malformed-kept, delta={d['delta']:+d}{flag}\n"
-                     f"      {d['file']}")
+        lines.append(
+            f"  {d['removed']}x refusal, {d['restitched']} re-stitch, "
+            f"{d['malformed']} malformed-kept, delta={d['delta']:+d}{flag}\n"
+            f"      {d['file']}"
+        )
     if not r["detail"]:
         lines.append("  (clean — no refusal turns found)")
     lines.append("\nDry run. Re-run with --apply to back up + scrub + self-verify.")

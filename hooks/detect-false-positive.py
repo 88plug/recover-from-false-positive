@@ -6,15 +6,19 @@ write ~/.claude/.fp-state.json for UserPromptSubmit hook to consume.
 Pure Python — no model generation, no retrigger risk.
 Fires at trip time: transcript is live, triggering turn is fresh.
 """
-import json, os, sys, glob, subprocess
+
+import json
+import os
+import sys
+import subprocess
 
 # The classifier's wording drifts — match a LIST of known phrases plus a loose
 # fallback, never a single hard-coded string (a stale string silently no-ops the
 # whole detector). Only consulted on turns already flagged isApiErrorMessage.
 SIGNATURES = (
-    "appears to violate our Usage Policy",             # legacy usage-policy wording
+    "appears to violate our Usage Policy",  # legacy usage-policy wording
     "flagged this message for a cybersecurity topic",  # 2026-07 cyber-safeguards wording
-    "cyber-related safeguards",                         # alternate cyber wording
+    "cyber-related safeguards",  # alternate cyber wording
 )
 _FALLBACK = ("cyber-use-case", "cybersecurity topic", "safeguards flagged")
 
@@ -34,8 +38,11 @@ def _is_refusal(o):
         return False
     m = o.get("message") if isinstance(o.get("message"), dict) else {}
     sd = m.get("stop_details") if isinstance(m.get("stop_details"), dict) else {}
-    return (m.get("stop_reason") == "refusal" or sd.get("type") == "refusal"
-            or _sig(_text(o)))
+    return (
+        m.get("stop_reason") == "refusal"
+        or sd.get("type") == "refusal"
+        or _sig(_text(o))
+    )
 
 
 def _refusal_category(o):
@@ -50,28 +57,103 @@ GLOBAL_CLAUDE_MD = os.path.expanduser("~/.claude/CLAUDE.md")
 # plugin, else the original standalone skill path (identical behavior off-plugin).
 _PLUGIN_ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT")
 SCRUB_SCRIPT = (
-    os.path.join(_PLUGIN_ROOT, "skills/recover-from-false-positive/scripts/scrub_refusals.py")
+    os.path.join(
+        _PLUGIN_ROOT, "skills/recover-from-false-positive/scripts/scrub_refusals.py"
+    )
     if _PLUGIN_ROOT
-    else os.path.expanduser("~/.claude/skills/recover-from-false-positive/scripts/scrub_refusals.py")
+    else os.path.expanduser(
+        "~/.claude/skills/recover-from-false-positive/scripts/scrub_refusals.py"
+    )
 )
 
 KNOWN_TRIGGER_CLASSES = {
-    "sigstore": ["cosign","slsa","oidc","attestation","fulcio","rekor","in-toto","provenance","keyless"],
+    "sigstore": [
+        "cosign",
+        "slsa",
+        "oidc",
+        "attestation",
+        "fulcio",
+        "rekor",
+        "in-toto",
+        "provenance",
+        "keyless",
+    ],
     # strip-gemm, strip phase, docker fleet deploy with SSH all trigger mining class
-    "mining": ["coinbase","dev-fee","blake3","jit","decrypt","cpuid","hashrate","nonce","pow","armor",
-               "strip-gemm","strip_gemm","gemm","strip phase","pearl-fuse","fleet","mining vocab",
-               "mining software","trigger class"],
-    "btcpay": ["lnd","lndinit","lightning","wallet","bitcoin","bitcoind","webhook","channel","openssl"],
-    "chaos": ["chaos","teardown","failover","gauntlet","raft","leader","election","never-break"],
-    "subagent-vocab": ["security vulnerabilities","anti-tamper","honeypot","tamper detection","frida"],
-    "credential-enum": ["ncmec","esp_key","token","secret","credential"],
+    "mining": [
+        "coinbase",
+        "dev-fee",
+        "blake3",
+        "jit",
+        "decrypt",
+        "cpuid",
+        "hashrate",
+        "nonce",
+        "pow",
+        "armor",
+        "strip-gemm",
+        "strip_gemm",
+        "gemm",
+        "strip phase",
+        "pearl-fuse",
+        "fleet",
+        "mining vocab",
+        "mining software",
+        "trigger class",
+    ],
+    "btcpay": [
+        "lnd",
+        "lndinit",
+        "lightning",
+        "wallet",
+        "bitcoin",
+        "bitcoind",
+        "webhook",
+        "channel",
+        "openssl",
+    ],
+    "chaos": [
+        "chaos",
+        "teardown",
+        "failover",
+        "gauntlet",
+        "raft",
+        "leader",
+        "election",
+        "never-break",
+    ],
+    "subagent-vocab": [
+        "security vulnerabilities",
+        "anti-tamper",
+        "honeypot",
+        "tamper detection",
+        "frida",
+    ],
+    "credential-enum": ["ncmec", "esp_key", "token", "secret", "credential"],
     # SSH + docker fleet deployment into multiple IPs co-located with mining vocab
-    "fleet-ssh": ["stricthostkeychecking=no","for ip in","docker inspect","docker pull","192.168"],
+    "fleet-ssh": [
+        "stricthostkeychecking=no",
+        "for ip in",
+        "docker inspect",
+        "docker pull",
+        "192.168",
+    ],
     # compiler-internals / warm-cache build acceleration — codegen dedup, generic
     # instantiation, walking a toolchain's own source (e.g. Go cmd/compile/noder)
-    "build-accel": ["codegen","noder","cmd/compile","share-generics","generic instantiation",
-                    "redundant compil","instantiation","warm-cache","first-build",
-                    "build acceleration","extern-template","incremental compile","toolchain"],
+    "build-accel": [
+        "codegen",
+        "noder",
+        "cmd/compile",
+        "share-generics",
+        "generic instantiation",
+        "redundant compil",
+        "instantiation",
+        "warm-cache",
+        "first-build",
+        "build acceleration",
+        "extern-template",
+        "incremental compile",
+        "toolchain",
+    ],
 }
 
 
@@ -117,7 +199,11 @@ def extract_trigger_text(transcript_path):
     """Return (trigger_text, categories): the text of the turn(s) that triggered each
     refusal (its parent) and the set of server categories that fired (cyber/weapons/…)."""
     try:
-        lines = open(transcript_path, encoding="utf-8", errors="surrogatepass").read().splitlines()
+        lines = (
+            open(transcript_path, encoding="utf-8", errors="surrogatepass")
+            .read()
+            .splitlines()
+        )
     except Exception:
         return "", []
 
@@ -125,11 +211,11 @@ def extract_trigger_text(transcript_path):
     error_parent_uuids = []
     categories = []
 
-    for l in lines:
-        if not l.strip():
+    for line in lines:
+        if not line.strip():
             continue
         try:
-            o = json.loads(l)
+            o = json.loads(line)
         except Exception:
             continue
         if o.get("uuid"):
@@ -274,8 +360,13 @@ def main():
     # Desktop notification (best-effort; subprocess.run with list avoids shell injection)
     try:
         subprocess.run(
-            ["notify-send", "Claude Code", "API output error detected. Continue session to auto-recover."],
-            capture_output=True, timeout=3,
+            [
+                "notify-send",
+                "Claude Code",
+                "API output error detected. Continue session to auto-recover.",
+            ],
+            capture_output=True,
+            timeout=3,
         )
     except Exception:
         pass
