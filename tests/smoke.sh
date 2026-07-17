@@ -23,8 +23,56 @@ for event, groups in d["hooks"].items():
 print("   hooks.json ok")
 PY
 
-echo "4. subagent-framing hook emits valid JSON"
-"$ROOT"/hooks/inject-subagent-framing.sh | python3 -c 'import json,sys; json.load(sys.stdin)'
+echo "4. subagent-framing hook emits valid JSON (with jq if present)"
+"$ROOT"/hooks/inject-subagent-framing.sh | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "hookSpecificOutput" in d'
+
+echo "4b. inject hooks work WITHOUT jq (GOLD T1 — python fallback via run-python.sh)"
+# PATH with only our bin — no jq. run-python.sh still finds Python via abs paths.
+NOJQ_BIN=/tmp/rfp-nojq-bin-$$
+mkdir -p "$NOJQ_BIN"
+for c in python3 bash cat rm mkdir printf dirname uname; do
+  src="$(command -v "$c" 2>/dev/null || true)"
+  [ -n "$src" ] && ln -sf "$src" "$NOJQ_BIN/$c"
+done
+# Prove jq is not visible under this PATH
+if env -i PATH="$NOJQ_BIN" command -v jq >/dev/null 2>&1; then
+  echo "   no-jq PATH still has jq"; exit 1
+fi
+NOJQ_ENV=(env -i HOME="$HOME" PATH="$NOJQ_BIN" CLAUDE_PLUGIN_ROOT="$ROOT")
+OUT=$("${NOJQ_ENV[@]}" bash "$ROOT/hooks/inject-subagent-framing.sh")
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["hookSpecificOutput"]["hookEventName"]=="SubagentStart"; assert "GENERATION GUIDELINE" in d["hookSpecificOutput"]["additionalContext"]' "$OUT"
+OUT=$("${NOJQ_ENV[@]}" bash "$ROOT/hooks/inject-claudemd-into-subagents.sh")
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["hookSpecificOutput"]["hookEventName"]=="SubagentStart"; assert "Inherited CLAUDE.md" in d["hookSpecificOutput"]["additionalContext"]' "$OUT"
+# recovery-context: prevention-only path (no state file)
+H=/tmp/rfp-nojq-home-$$; mkdir -p "$H/.claude"
+OUT=$(echo '{"cwd":"/tmp/demo","session_id":"s1"}' | env -i HOME="$H" PATH="$NOJQ_BIN" CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/inject-recovery-context.sh")
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["hookSpecificOutput"]["hookEventName"]=="UserPromptSubmit"; assert "GENERATION GUIDELINE" in d["hookSpecificOutput"]["additionalContext"]' "$OUT"
+# recovery-context: post-trip path reads .fp-state.json fields without jq
+python3 - "$H/.claude/.fp-state.json" <<'PY'
+import json,sys
+json.dump({
+  "session_id": "s1",
+  "scrub_command": "echo scrub",
+  "project_claude_md": "/tmp/demo/CLAUDE.md",
+  "project_path": "/tmp/demo",
+  "classification": "project-only",
+  "vocab_clusters": {"toolchain": ["codegen"], "build": ["noder"]},
+}, open(sys.argv[1],"w"))
+PY
+OUT=$(echo '{"cwd":"/tmp/demo","session_id":"s1"}' | env -i HOME="$H" PATH="$NOJQ_BIN" CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/inject-recovery-context.sh")
+python3 -c '
+import json,sys
+d=json.loads(sys.argv[1]); ctx=d["hookSpecificOutput"]["additionalContext"]
+assert "RECOVERY NEEDED" in ctx
+assert "echo scrub" in ctx
+assert "/tmp/demo/CLAUDE.md" in ctx
+assert "toolchain" in ctx and "build" in ctx
+assert "project-only" in ctx
+' "$OUT"
+# state consumed
+[ ! -f "$H/.claude/.fp-state.json" ] || { echo "   state not consumed"; exit 1; }
+rm -rf "$H" "$NOJQ_BIN"
+echo "   no-jq inject path ok"
 
 echo "5. classifier-signature regression — every known wording is detected + scrubbed"
 # Guards against the exact failure that shipped: a single hard-coded signature

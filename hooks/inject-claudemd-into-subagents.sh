@@ -9,11 +9,32 @@
 #
 # Wired via ~/.claude/settings.json SubagentStart hook with matcher "Explore|Plan".
 # Reads no stdin; emits JSON to stdout with additionalContext to inject.
+# JSON emit: prefer jq; fall back to run-python.sh (GOLD T1 — no hard jq dep).
 
 set -euo pipefail
 
 USER_MD="${HOME}/.claude/CLAUDE.md"
 PROJECT_MD="${CLAUDE_PROJECT_DIR:-}/CLAUDE.md"
+
+_plugin_root() {
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+    printf '%s' "$CLAUDE_PLUGIN_ROOT"
+  else
+    cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd
+  fi
+}
+
+emit() {
+  local ctx="$1"
+  if command -v jq >/dev/null 2>&1; then
+    jq -n --arg c "$ctx" \
+      '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:$c}}'
+  else
+    # stdin carries context (CLAUDE.md can be large / contain any chars)
+    printf '%s' "$ctx" | bash "$(_plugin_root)/scripts/run-python.sh" -c \
+      'import json,sys; print(json.dumps({"hookSpecificOutput":{"hookEventName":"SubagentStart","additionalContext":sys.stdin.read()}}))'
+  fi
+}
 
 content=$'# Inherited CLAUDE.md context\n\nExplore/Plan subagents skip CLAUDE.md by default. The following is re-injected so this subagent operates under the same rules as the parent session.\n\n'
 
@@ -29,4 +50,4 @@ if [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -f "${PROJECT_MD}" ]; then
   content+=$'\n'
 fi
 
-jq -n --arg c "$content" '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:$c}}'
+emit "$content"

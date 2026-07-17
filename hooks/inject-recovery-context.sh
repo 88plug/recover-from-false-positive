@@ -7,14 +7,78 @@
 #   3. Post-trip: if .fp-state.json exists, inject recovery steps, then consume it.
 #
 # IMPORTANT: no vocabulary from known trigger classes in this file.
+# JSON read/emit: prefer jq; fall back to run-python.sh (GOLD T1 — no hard jq dep).
 
 STATE="$HOME/.claude/.fp-state.json"
 
+_plugin_root() {
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+    printf '%s' "$CLAUDE_PLUGIN_ROOT"
+  else
+    cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd
+  fi
+}
+
+_run_py() {
+  bash "$(_plugin_root)/scripts/run-python.sh" "$@"
+}
+
+# Read top-level string field from JSON on stdin. Missing/null → empty (jq // empty).
+json_stdin_field() {
+  local key="$1"
+  if command -v jq >/dev/null 2>&1; then
+    jq -r --arg k "$key" '.[$k] // empty' 2>/dev/null || true
+  else
+    RFFP_KEY="$key" _run_py -c \
+      'import json,sys,os
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    d = {}
+v = d.get(os.environ["RFFP_KEY"])
+print("" if v is None else v)' 2>/dev/null || true
+  fi
+}
+
+# Read top-level field from a JSON file. Missing/null → default (jq // default).
+json_file_field() {
+  local file="$1" key="$2" default="${3:-}"
+  if command -v jq >/dev/null 2>&1; then
+    jq -r --arg k "$key" --arg d "$default" '.[$k] // $d' "$file" 2>/dev/null || printf '%s' "$default"
+  else
+    RFFP_KEY="$key" RFFP_DEF="$default" _run_py -c \
+      'import json,sys,os
+try:
+    d = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    d = {}
+v = d.get(os.environ["RFFP_KEY"])
+print(os.environ["RFFP_DEF"] if v is None else v)' "$file" 2>/dev/null || printf '%s' "$default"
+  fi
+}
+
+# vocab_clusters keys joined by ", " — empty if missing/malformed.
+json_file_cluster_keys() {
+  local file="$1"
+  if command -v jq >/dev/null 2>&1; then
+    jq -r '[.vocab_clusters | keys[]] | join(", ")' "$file" 2>/dev/null || true
+  else
+    _run_py -c \
+      'import json,sys
+try:
+    d = json.load(open(sys.argv[1], encoding="utf-8"))
+    vc = d.get("vocab_clusters") or {}
+    print(", ".join(sorted(vc.keys()) if isinstance(vc, dict) else []))
+except Exception:
+    print("")' "$file" 2>/dev/null || true
+  fi
+}
+
 # stdin carries the hook payload (session_id, cwd, transcript_path, …)
 PAYLOAD="$(cat 2>/dev/null)"
-CWD="$(printf '%s' "$PAYLOAD" | jq -r '.cwd // empty' 2>/dev/null)"
+CWD="$(printf '%s' "$PAYLOAD" | json_stdin_field cwd)"
 [[ -z "$CWD" ]] && CWD="$PWD"
-SESSION_ID="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null)"
+SESSION_ID="$(printf '%s' "$PAYLOAD" | json_stdin_field session_id)"
 SLUG="${CWD//\//-}"
 REINJECT="$HOME/.claude/.fp-reinject-${SLUG}.md"
 
@@ -26,7 +90,16 @@ fi
 
 PREVENTION="GENERATION GUIDELINE: In shell commands, reference container image names via shell variables (\$IMAGE, \$TAG) rather than embedding them inline. For operations spanning multiple hosts, use ansible — not inline SSH loops."
 
-emit() { jq -n --arg ctx "$1" '{hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:$ctx}}'; }
+emit() {
+  local ctx="$1"
+  if command -v jq >/dev/null 2>&1; then
+    jq -n --arg ctx "$ctx" \
+      '{hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:$ctx}}'
+  else
+    printf '%s' "$ctx" | _run_py -c \
+      'import json,sys; print(json.dumps({"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":sys.stdin.read()}}))'
+  fi
+}
 
 # ── Job 2: clear-then-reinject (highest priority; the in-place recovery) ──────
 if [[ -f "$REINJECT" ]]; then
@@ -51,7 +124,7 @@ fi
 # session's first turn is a false trigger. Discard it and fall through to
 # prevention-only. (Conservative: only discard on a confirmed mismatch — an
 # older state file or payload missing session_id still gets the old behavior.)
-STATE_SESSION_ID=$(jq -r '.session_id // empty' "$STATE" 2>/dev/null)
+STATE_SESSION_ID=$(json_file_field "$STATE" session_id "")
 if [[ -n "$STATE_SESSION_ID" && -n "$SESSION_ID" && "$STATE_SESSION_ID" != "$SESSION_ID" ]]; then
     rm -f "$STATE"
     emit "$PREVENTION"
@@ -59,11 +132,11 @@ if [[ -n "$STATE_SESSION_ID" && -n "$SESSION_ID" && "$STATE_SESSION_ID" != "$SES
 fi
 
 # ── Job 3: post-trip recovery ────────────────────────────────────────────────
-SCRUB_CMD=$(jq -r '.scrub_command // empty' "$STATE" 2>/dev/null)
-PROJECT_MD=$(jq -r '.project_claude_md // "not found"' "$STATE" 2>/dev/null)
-PROJECT_PATH=$(jq -r '.project_path // "unknown"' "$STATE" 2>/dev/null)
-CLASSIFICATION=$(jq -r '.classification // "unknown"' "$STATE" 2>/dev/null)
-CLUSTERS=$(jq -r '[.vocab_clusters | keys[]] | join(", ")' "$STATE" 2>/dev/null)
+SCRUB_CMD=$(json_file_field "$STATE" scrub_command "")
+PROJECT_MD=$(json_file_field "$STATE" project_claude_md "not found")
+PROJECT_PATH=$(json_file_field "$STATE" project_path "unknown")
+CLASSIFICATION=$(json_file_field "$STATE" classification "unknown")
+CLUSTERS=$(json_file_cluster_keys "$STATE")
 rm -f "$STATE"
 
 if [[ "$CLASSIFICATION" == "both" || "$CLASSIFICATION" == *"edgar-morin"* ]]; then
