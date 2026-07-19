@@ -23,6 +23,14 @@ Built for developers whose AI agents hit the classifier on legitimate work — m
 /plugin install recover-from-false-positive@88plug
 ```
 
+### Grok Build
+
+```text
+grok plugin marketplace add 88plug/claude-code-plugins
+grok plugin install recover-from-false-positive@88plug --trust
+```
+
+
 ## Quickstart
 
 The skill auto-triggers when Usage-Policy / cyber-safeguards error text appears in the conversation. To run the log surgeon yourself:

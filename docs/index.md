@@ -21,6 +21,14 @@ next session does not re-trip.
 /plugin install recover-from-false-positive@88plug
 ```
 
+### Grok Build
+
+```text
+grok plugin marketplace add 88plug/claude-code-plugins
+grok plugin install recover-from-false-positive@88plug --trust
+```
+
+
 Full details: [Installation](installation.md).
 
 ## Quickstart
