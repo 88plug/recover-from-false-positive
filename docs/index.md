@@ -29,7 +29,7 @@ grok plugin install recover-from-false-positive@88plug --trust
 ```
 
 
-Full details: [Installation](installation.md).
+Full details: [Installation](https://github.com/88plug/recover-from-false-positive/blob/main/installation.md).
 
 ## Quickstart
 
@@ -77,10 +77,10 @@ Claude Code `.jsonl` logs are a linked list. Every turn carries a `uuid` and a
 
 ## Docs map
 
-- [Installation](installation.md) — marketplace install, hooks, local checkout
-- [When it triggers](when-triggers.md) — mechanism, signatures, known domains
-- [Scrub workflow](scrub-workflow.md) — fix-active, desaturate, handoff, CLI flags
-- [Troubleshooting](troubleshooting.md) — resume failures, cascade, audits
+- [Installation](https://github.com/88plug/recover-from-false-positive/blob/main/installation.md) — marketplace install, hooks, local checkout
+- [When it triggers](https://github.com/88plug/recover-from-false-positive/blob/main/when-triggers.md) — mechanism, signatures, known domains
+- [Scrub workflow](https://github.com/88plug/recover-from-false-positive/blob/main/scrub-workflow.md) — fix-active, desaturate, handoff, CLI flags
+- [Troubleshooting](https://github.com/88plug/recover-from-false-positive/blob/main/troubleshooting.md) — resume failures, cascade, audits
 
 ## What it bundles
 
@@ -112,3 +112,13 @@ Once the plugin is enabled:
 
 [FSL-1.1-ALv2](https://github.com/88plug/recover-from-false-positive/blob/main/LICENSE)
 — Functional Source License, converts to Apache-2.0.
+
+## Features
+
+| Feature | What you get |
+| --- | --- |
+| Active session recovery | Remove only the trigger message + refusal; resume as if neither happened |
+| Machine-wide cleanup | Dry-run then `--apply` to scrub accumulated refusal turns; chain-safe |
+| Recurrence guard | Classify the trigger; install a `CLAUDE.md` framing section naming real files and vocab |
+| Hands-free hooks | Detect on `StopFailure`, inject recovery on next prompt, frame every subagent |
+| JSON-aware repair | Re-stitch `uuid` / `parentUuid` — never a blind `sed` delete |
