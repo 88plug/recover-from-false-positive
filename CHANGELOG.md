@@ -2,6 +2,8 @@
 
 ## 2026.7.19
 
+- Align local marketplace descriptions with `plugin.json`; fix docs map links to in-tree pages (were 404 GitHub paths under repo root).
+
 **Surgical de-saturation is now the DEFAULT — word-for-word matters.**
 
 De-saturation no longer neutralizes tokens in place (the old `[detail]` stubbing

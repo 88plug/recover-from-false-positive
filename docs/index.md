@@ -31,7 +31,7 @@ grok plugin install recover-from-false-positive@88plug --trust
 ```
 
 
-Full details: [Installation](https://github.com/88plug/recover-from-false-positive/blob/main/installation.md).
+Full details: [Installation](installation.md).
 
 ## Quickstart
 
@@ -79,10 +79,10 @@ Claude Code `.jsonl` logs are a linked list. Every turn carries a `uuid` and a
 
 ## Docs map
 
-- [Installation](https://github.com/88plug/recover-from-false-positive/blob/main/installation.md) — marketplace install, hooks, local checkout
-- [When it triggers](https://github.com/88plug/recover-from-false-positive/blob/main/when-triggers.md) — mechanism, signatures, known domains
-- [Scrub workflow](https://github.com/88plug/recover-from-false-positive/blob/main/scrub-workflow.md) — fix-active, desaturate, handoff, CLI flags
-- [Troubleshooting](https://github.com/88plug/recover-from-false-positive/blob/main/troubleshooting.md) — resume failures, cascade, audits
+- [Installation](installation.md) — marketplace install, hooks, local checkout
+- [When it triggers](when-triggers.md) — mechanism, signatures, known domains
+- [Scrub workflow](scrub-workflow.md) — fix-active, desaturate, handoff, CLI flags
+- [Troubleshooting](troubleshooting.md) — resume failures, cascade, audits
 
 ## What it bundles
 

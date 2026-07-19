@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "recover-from-false-positive",
-  "description": "Recover Claude Code sessions after an Anthropic API output-classifier false positive.",
+  "description": "Recover Claude Code sessions after an Anthropic API output-classifier false positive (the \"cyber-related safeguards\" / \"appears to violate our Usage Policy\" hard failure). A JSON-aware .jsonl log surgeon that surgically removes the triggering message + refusal turn and re-stitches the parentUuid chain so the session resumes cleanly, cleans accumulated refusals across old sessions, and installs a per-repo CLAUDE.md framing guard to stop recurrence.",
   "owner": {
     "name": "88plug",
     "email": "andrew@88plug.com"
@@ -11,12 +11,12 @@
       "name": "recover-from-false-positive",
       "source": ".",
       "displayName": "Recover From False Positive",
-      "description": "JSON-aware .jsonl log surgeon that removes the triggering message + refusal turn, re-stitches the parentUuid chain so the session resumes cleanly, cleans accumulated refusals across old sessions, and installs a per-repo CLAUDE.md framing guard to stop recurrence.",
+      "description": "Recover Claude Code sessions after an Anthropic API output-classifier false positive (the \"cyber-related safeguards\" / \"appears to violate our Usage Policy\" hard failure). A JSON-aware .jsonl log surgeon that surgically removes the triggering message + refusal turn and re-stitches the parentUuid chain so the session resumes cleanly, cleans accumulated refusals across old sessions, and installs a per-repo CLAUDE.md framing guard to stop recurrence.",
       "author": { "name": "88plug", "email": "andrew@88plug.com" },
       "homepage": "https://github.com/88plug/recover-from-false-positive",
       "license": "FSL-1.1-ALv2",
       "category": "productivity",
-      "tags": ["type:plugin", "classifier", "false-positive", "session-recovery", "jsonl", "log-repair"]
+      "tags": ["type:plugin", "classifier", "false-positive", "session-recovery", "jsonl", "log-repair", "usage-policy"]
     }
   ]
 }
