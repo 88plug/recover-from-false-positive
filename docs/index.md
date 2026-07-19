@@ -16,6 +16,8 @@ next session does not re-trip.
 
 ## Install
 
+### Claude Code
+
 ```text
 /plugin marketplace add 88plug/claude-code-plugins
 /plugin install recover-from-false-positive@88plug

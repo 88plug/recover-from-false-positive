@@ -2,10 +2,22 @@
 
 ## Marketplace (recommended)
 
+### Claude Code
+
 ```text
 /plugin marketplace add 88plug/claude-code-plugins
 /plugin install recover-from-false-positive@88plug
 ```
+
+### Grok Build
+
+```text
+grok plugin marketplace add 88plug/claude-code-plugins
+grok plugin install recover-from-false-positive@88plug --trust
+```
+
+Primary product is Claude Code false-positive recovery. Same hub ships on the
+Grok marketplace for dual-harness install.
 
 Claude Code lists the bundled hooks in the install panel. They run automatically
 once the plugin is enabled.

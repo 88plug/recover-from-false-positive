@@ -18,6 +18,8 @@ Built for developers whose AI agents hit the classifier on legitimate work — m
 
 ## Install
 
+### Claude Code
+
 ```text
 /plugin marketplace add 88plug/claude-code-plugins
 /plugin install recover-from-false-positive@88plug
